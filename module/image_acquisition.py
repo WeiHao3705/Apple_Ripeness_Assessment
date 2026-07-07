@@ -16,6 +16,8 @@ MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 MIN_IMAGE_WIDTH = 300
 MIN_IMAGE_HEIGHT = 300
 UPLOAD_DIR = Path("uploads")
+BEFORE_CLAHE_DIR = UPLOAD_DIR / "before_clahe"
+AFTER_CLAHE_DIR = UPLOAD_DIR / "after_clahe"
 
 
 def pil_to_cv2(img: Image.Image) -> np.ndarray:
@@ -32,24 +34,33 @@ def _read_uploaded_image(uploaded_file) -> tuple[np.ndarray, Image.Image]:
 
 
 def _save_uploaded_image(uploaded_file, pil_image: Image.Image) -> Path:
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    BEFORE_CLAHE_DIR.mkdir(parents=True, exist_ok=True)
     original_name = Path(uploaded_file.name)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     saved_name = f"{original_name.stem}_{timestamp}{original_name.suffix.lower()}"
-    saved_path = UPLOAD_DIR / saved_name
+    saved_path = BEFORE_CLAHE_DIR / saved_name
     pil_image.save(saved_path)
+    return saved_path
+
+
+def save_processed_image(processed_image: np.ndarray, source_path: Path) -> Path:
+    AFTER_CLAHE_DIR.mkdir(parents=True, exist_ok=True)
+    saved_name = f"{source_path.stem}_clahe{source_path.suffix}"
+    saved_path = AFTER_CLAHE_DIR / saved_name
+    cv2.imwrite(saved_path.as_posix(), processed_image)
     return saved_path
 
 
 def _maybe_save_uploaded_image(uploaded_file, pil_image: Image.Image) -> Path | None:
     file_hash = hashlib.sha256(uploaded_file.getvalue()).hexdigest()
-    saved_hashes = st.session_state.setdefault("saved_upload_hashes", set())
+    saved_paths = st.session_state.setdefault("saved_upload_paths", {})
 
-    if file_hash in saved_hashes:
-        return None
+    if file_hash in saved_paths:
+        return Path(saved_paths[file_hash])
 
-    saved_hashes.add(file_hash)
-    return _save_uploaded_image(uploaded_file, pil_image)
+    saved_path = _save_uploaded_image(uploaded_file, pil_image)
+    saved_paths[file_hash] = saved_path.as_posix()
+    return saved_path
 
 
 def _display_uploaded_image(uploaded_file, image: np.ndarray, pil_image: Image.Image) -> None:
@@ -73,7 +84,7 @@ def _validate_uploaded_file(uploaded_file) -> str | None:
     return file_extension
 
 
-def _process_uploaded_file(uploaded_file) -> np.ndarray | None:
+def _process_uploaded_file(uploaded_file) -> tuple[np.ndarray, Path] | None:
     if _validate_uploaded_file(uploaded_file) is None:
         return None
 
@@ -90,10 +101,13 @@ def _process_uploaded_file(uploaded_file) -> np.ndarray | None:
     _display_uploaded_image(uploaded_file, image, pil_image)
 
     saved_path = _maybe_save_uploaded_image(uploaded_file, pil_image)
-    if saved_path is not None:
-        st.caption(f"Saved to: {saved_path.as_posix()}")
+    if saved_path is None:
+        st.error("Unable to save the uploaded image.")
+        return None
 
-    return image
+    st.caption(f"Saved to: {saved_path.as_posix()}")
+
+    return image, saved_path
 
 
 def upload_single_image():
@@ -123,9 +137,9 @@ def upload_batch_images():
 
     images = []
     for uploaded_file in uploaded_files:
-        image = _process_uploaded_file(uploaded_file)
-        if image is not None:
-            images.append(image)
+        image_info = _process_uploaded_file(uploaded_file)
+        if image_info is not None:
+            images.append(image_info)
 
     if images:
         st.success(f"{len(images)} image(s) uploaded successfully.")
