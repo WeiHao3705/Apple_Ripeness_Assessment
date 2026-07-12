@@ -13,8 +13,8 @@ from PIL import Image, UnidentifiedImageError
 
 SUPPORTED_EXTENSIONS = {"jpg", "jpeg", "png"}
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
-MIN_IMAGE_WIDTH = 300
-MIN_IMAGE_HEIGHT = 300
+MIN_IMAGE_WIDTH = 100
+MIN_IMAGE_HEIGHT = 100
 UPLOAD_DIR = Path("uploads")
 BEFORE_CLAHE_DIR = UPLOAD_DIR / "before_clahe"
 AFTER_CLAHE_DIR = UPLOAD_DIR / "after_clahe"
