@@ -10,29 +10,6 @@ from module.preprocessing import apply_clahe, segment_background
 from module.object_detection import detect_objects, detect_edges, apply_watershed
 
 st.title("Apple Ripeness System")
-AFTER_CLAHE_DIR = UPLOAD_DIR / "after_clahe"
-
-
-def show_comparison(original, processed, title="CLAHE Comparison"):
-    st.subheader(title)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.image(
-            original,
-            channels="BGR",
-            caption="Original Image",
-            use_container_width=True,
-        )
-
-    with col2:
-        st.image(
-            processed,
-            channels="BGR",
-            caption="After CLAHE",
-            use_container_width=True,
-        )
 
 
 def show_detection_results(segmented_img, contour_img, edge_img, watershed_img, binary_mask, edge_mask, watershed_mask):
@@ -116,9 +93,14 @@ def process_image(img, original_path, label=None):
 
     if contour is not None:
         clahe_img = apply_clahe(segmented_img)
-        clahe_path = save_processed_image(clahe_img, original_path)
-        show_comparison(img, clahe_img, title=label or "CLAHE Comparison")
-        st.caption(f"CLAHE saved to: {clahe_path.as_posix()}")
+        save_processed_image(clahe_img, original_path)
+        st.subheader("Preprocessed Image")
+        st.image(
+            clahe_img,
+            channels="BGR",
+            caption="Result after preprocessing",
+            use_container_width=True,
+        )
 
 option = st.selectbox(
     "Select Input Method",
