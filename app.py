@@ -9,6 +9,7 @@ from module.image_acquisition import (
 )
 from module.preprocessing import preprocess_image_with_steps
 from module.object_detection import detect_objects, detect_edges, apply_watershed
+from module.classification import predict_ripeness
 
 st.title("Apple Ripeness System")
 
@@ -126,6 +127,18 @@ def process_image(img, original_path, label=None):
         st.image(preprocessed_img, channels="BGR", caption="Preprocessed Image")
         st.image(contour_img, channels="BGR", caption="Detection Result")
         return
+
+    try:
+        prediction = predict_ripeness(preprocessed_img)
+        st.subheader("CNN Classification Result")
+        st.success(
+            f"Predicted ripeness: {prediction['label']} "
+            f"(confidence: {prediction['confidence'] * 100:.2f}%)"
+        )
+        with st.expander("Show class probabilities"):
+            st.json(prediction["probabilities"])
+    except Exception as exc:
+        st.warning(f"CNN classification unavailable: {exc}")
 
     edge_mask, edge_img = detect_edges(preprocessed_img)
     watershed_img, markers, watershed_mask = apply_watershed(preprocessed_img)
