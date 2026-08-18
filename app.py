@@ -15,6 +15,7 @@ from module.object_detection import (
     detect_edges,
     apply_watershed,
 )
+from module.classification import predict_ripeness
 
 
 st.title("Apple Ripeness System")
@@ -154,15 +155,32 @@ def process_image(img, original_path):
         
         # Crop the specific apple from the original preprocessed image
         apple_roi = preprocessed_img[y:y+h, x:x+w]
-        
+
+        classification = {
+            "label": "Unknown",
+            "confidence": 0.0,
+            "probabilities": {},
+        }
+
+        try:
+            classification = predict_ripeness(apple_roi)
+        except (FileNotFoundError, ValueError, OSError, RuntimeError) as exc:
+            st.warning(f"Ripeness classification unavailable for Apple #{apple_id}: {exc}")
+
         with row_col1:
             st.subheader(f"#{apple_id}")
-            # Optional: Add a little detail about the crop size
             st.caption(f"Size: {w} x {h} px")
-            
+            st.caption(f"Ripeness: {classification['label']}")
+            st.caption(f"Confidence: {classification['confidence']:.2%}")
+             
         with row_col2:
             st.image(apple_roi, channels="BGR", use_container_width=False)
-            
+
+            if classification.get("probabilities"):
+                st.write("Class probabilities:")
+                for label, probability in classification["probabilities"].items():
+                    st.caption(f"- {label}: {probability:.2%}")
+             
         st.divider()
 
     # =========================================================
