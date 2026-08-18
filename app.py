@@ -108,7 +108,7 @@ def process_image(img, original_path):
     # =========================================================
 
     try:
-        contour, contour_img, binary_mask, status_message = (
+        detected_apples, contour_img, binary_mask, status_message = (
             detect_objects(preprocessed_img)
         )
 
@@ -117,18 +117,53 @@ def process_image(img, original_path):
         return
 
     if status_message:
-        if contour is not None:
+        if detected_apples:
             st.success(status_message)
         else:
             st.warning(status_message)
 
-    if contour is None:
+    if not detected_apples:
         st.image(
             contour_img,
             channels="BGR",
             caption="Detection Result"
         )
         return
+
+
+# =========================================================
+    # MODULE 3 — INDIVIDUAL APPLE DETECTIONS
+    # =========================================================
+    st.header("🍎 Individual Detection Results")
+    
+    # Create Table Headers (2 Columns)
+    header_col1, header_col2 = st.columns([1, 4])
+    with header_col1:
+        st.markdown("**Apple ID**")
+    with header_col2:
+        st.markdown("**Detected Apple (Crop)**")
+        
+    st.divider()
+
+    # Create one row per apple
+    for apple in detected_apples:
+        row_col1, row_col2 = st.columns([1, 4])
+        
+        x, y, w, h = apple["bbox"]
+        apple_id = apple["id"]
+        
+        # Crop the specific apple from the original preprocessed image
+        apple_roi = preprocessed_img[y:y+h, x:x+w]
+        
+        with row_col1:
+            st.subheader(f"#{apple_id}")
+            # Optional: Add a little detail about the crop size
+            st.caption(f"Size: {w} x {h} px")
+            
+        with row_col2:
+            st.image(apple_roi, channels="BGR", use_container_width=False)
+            
+        st.divider()
 
     # =========================================================
     # OTHER DETECTION METHODS
@@ -148,7 +183,7 @@ def process_image(img, original_path):
 
     st.subheader("Object Detection Results")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         st.image(
@@ -166,12 +201,13 @@ def process_image(img, original_path):
             use_container_width=True
         )
 
-    st.image(
-        watershed_img,
-        channels="BGR",
-        caption="Watershed Segmentation",
-        use_container_width=True
-    )
+    with col3:
+        st.image(
+            watershed_img,
+            channels="BGR",
+            caption="Watershed Segmentation",
+            use_container_width=True
+        )
 
 
 # =============================================================
