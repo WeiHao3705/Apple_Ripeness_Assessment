@@ -1,14 +1,14 @@
 import cv2
 import streamlit as st
 
-from module.image_acquisition import (
+from module.Module1.image_acquisition import (
     upload_single_image,
     upload_batch_images,
     camera_capture,
     save_processed_image,
 )
 
-from module.preprocessing import preprocess_image_with_steps
+from module.Module1.preprocessing import preprocess_image_with_steps
 
 from module.object_detection import (
     detect_objects,
@@ -28,7 +28,7 @@ def process_image(img, original_path):
 
     try:
         steps = preprocess_image_with_steps(img)
-        preprocessed_img = steps["final"]
+        preprocessed_img = steps.final
 
     except (ValueError, cv2.error) as exc:
         st.error(f"Image preprocessing failed: {exc}")
@@ -49,7 +49,7 @@ def process_image(img, original_path):
 
     with col1:
         st.image(
-            steps["resized"],
+            steps.resized,
             channels="BGR",
             caption="Resized (224 × 224)",
             use_container_width=True
@@ -57,7 +57,7 @@ def process_image(img, original_path):
 
     with col2:
         st.image(
-            steps["clahe"],
+            steps.clahe,
             channels="BGR",
             caption="CLAHE Enhanced",
             use_container_width=True
@@ -81,7 +81,7 @@ def process_image(img, original_path):
 
         with col1:
             st.image(
-                steps["candidate_mask"],
+                steps.hsv_candidate_mask,
                 caption="Apple Colour Candidate Mask",
                 clamp=True,
                 use_container_width=True
@@ -89,7 +89,7 @@ def process_image(img, original_path):
 
         with col2:
             st.image(
-                steps["grabcut_mask"],
+                steps.grabcut_mask,
                 caption="GrabCut Mask",
                 clamp=True,
                 use_container_width=True
@@ -97,7 +97,7 @@ def process_image(img, original_path):
 
         with col3:
             st.image(
-                steps["closed_mask"],
+                steps.refined_mask,
                 caption="Mask After Closing",
                 clamp=True,
                 use_container_width=True
