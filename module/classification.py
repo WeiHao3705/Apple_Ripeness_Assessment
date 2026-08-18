@@ -6,8 +6,8 @@ from pathlib import Path
 import cv2
 import joblib
 import numpy as np
-from tensorflow.keras.models import load_model
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from keras.models import load_model
+from keras.applications.mobilenet_v2 import preprocess_input
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

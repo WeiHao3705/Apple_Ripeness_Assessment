@@ -75,7 +75,7 @@ def detect_objects(segmented_img: np.ndarray):
                 circularity = (4.0 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0.0
                 
                 # --- RULE 2: SHAPE CONFIG (Aspect: 0.3-1.6, Solidity > 0.72, Circularity > 0.42) ---
-                if (0.30 <= aspect <= 1.60) and (solidity >= 0.72) and (circularity >= 0.42):
+                if (0.30 <= aspect <= 1.60) and (solidity >= 0.50) and (circularity >= 0.20):
                     valid_contours.append(c)
 
     annotated_image = image.copy()
