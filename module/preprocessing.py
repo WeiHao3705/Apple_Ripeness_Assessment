@@ -2,32 +2,7 @@ import cv2
 import numpy as np
 
 
-# ============================================================
-# 1. IMAGE RESIZING
-# ============================================================
-
-def resize_image(
-    image: np.ndarray,
-    size: tuple[int, int] = (224, 224)
-) -> np.ndarray:
-    """
-    Resize an input image to a fixed resolution.
-
-    Parameters
-    ----------
-    image : np.ndarray
-        Input BGR image.
-
-    size : tuple[int, int]
-        Target image size.
-        Default is (224, 224).
-
-    Returns
-    -------
-    np.ndarray
-        Resized BGR image.
-    """
-
+def resize_image(image: np.ndarray) -> np.ndarray:
     if image is None or image.size == 0:
         raise ValueError("Input image is empty.")
 
@@ -36,45 +11,14 @@ def resize_image(
             "resize_image expects a BGR image with 3 channels."
         )
 
-    resized_image = cv2.resize(
+    return cv2.resize(
         image,
-        size,
+        (224, 224),
         interpolation=cv2.INTER_AREA
     )
 
-    return resized_image
 
-
-# ============================================================
-# 2. CLAHE CONTRAST ENHANCEMENT
-# ============================================================
-
-def apply_clahe(
-    image: np.ndarray,
-    clip_limit: float = 2.0,
-    tile_grid_size: tuple[int, int] = (8, 8)
-) -> np.ndarray:
-    """
-    Apply Contrast Limited Adaptive Histogram Equalisation
-    (CLAHE) to the lightness channel of the image.
-
-    Parameters
-    ----------
-    image : np.ndarray
-        Input BGR image.
-
-    clip_limit : float
-        CLAHE contrast limiting value.
-
-    tile_grid_size : tuple[int, int]
-        Number of tiles used by CLAHE.
-
-    Returns
-    -------
-    np.ndarray
-        Contrast-enhanced BGR image.
-    """
-
+def apply_clahe(image: np.ndarray) -> np.ndarray:
     if image is None or image.size == 0:
         raise ValueError("Input image is empty.")
 
@@ -83,132 +27,206 @@ def apply_clahe(
             "apply_clahe expects a BGR image with 3 channels."
         )
 
-    # Convert BGR image to LAB colour space.
-    lab_image = cv2.cvtColor(
+    lab = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2LAB
     )
 
-    # Separate lightness and colour channels.
-    l_channel, a_channel, b_channel = cv2.split(
-        lab_image
-    )
+    l, a, b = cv2.split(lab)
 
-    # Create CLAHE object.
     clahe = cv2.createCLAHE(
-        clipLimit=clip_limit,
-        tileGridSize=tile_grid_size
+        clipLimit=2.0,
+        tileGridSize=(8, 8)
     )
 
-    # Apply CLAHE only to the lightness channel.
-    enhanced_l = clahe.apply(
-        l_channel
-    )
+    enhanced_l = clahe.apply(l)
 
-    # Merge the enhanced lightness channel
-    # with the original colour channels.
     enhanced_lab = cv2.merge(
-        (
-            enhanced_l,
-            a_channel,
-            b_channel
-        )
+        (enhanced_l, a, b)
     )
 
-    # Convert back to BGR colour space.
-    enhanced_image = cv2.cvtColor(
+    return cv2.cvtColor(
         enhanced_lab,
         cv2.COLOR_LAB2BGR
     )
 
-    return enhanced_image
+
+def apply_closing(mask: np.ndarray) -> np.ndarray:
+    if mask is None or mask.size == 0:
+        raise ValueError("Input mask is empty.")
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (5, 5)
+    )
+
+    return cv2.morphologyEx(
+        mask,
+        cv2.MORPH_CLOSE,
+        kernel
+    )
 
 
-# ============================================================
-# 3. GRABCUT BACKGROUND SEGMENTATION
-# ============================================================
+def apply_opening(mask: np.ndarray) -> np.ndarray:
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (3, 3)
+    )
 
-def grabcut_segmentation(
-    image: np.ndarray,
-    inset_ratio: float = 0.08,
-    iterations: int = 5
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Perform GrabCut background segmentation.
+    return cv2.morphologyEx(
+        mask,
+        cv2.MORPH_OPEN,
+        kernel
+    )
 
-    GrabCut separates the likely foreground region from
-    the surrounding background.
 
-    Parameters
-    ----------
-    image : np.ndarray
-        Input BGR image.
+def create_apple_candidate_mask(
+    image: np.ndarray
+) -> np.ndarray:
 
-    inset_ratio : float
-        Percentage of the image border excluded from the
-        initial GrabCut rectangle.
+    hsv = cv2.cvtColor(
+        image,
+        cv2.COLOR_BGR2HSV
+    )
 
-    iterations : int
-        Number of GrabCut iterations.
+    red_lower_1 = np.array(
+        [0, 70, 40],
+        dtype=np.uint8
+    )
 
-    Returns
-    -------
-    segmented_image : np.ndarray
-        BGR image containing the retained foreground.
+    red_upper_1 = np.array(
+        [12, 255, 255],
+        dtype=np.uint8
+    )
 
-    foreground_mask : np.ndarray
-        Binary mask where:
-        255 = foreground
-        0   = background
-    """
+    red_lower_2 = np.array(
+        [165, 70, 40],
+        dtype=np.uint8
+    )
+
+    red_upper_2 = np.array(
+        [179, 255, 255],
+        dtype=np.uint8
+    )
+
+    red_mask_1 = cv2.inRange(
+        hsv,
+        red_lower_1,
+        red_upper_1
+    )
+
+    red_mask_2 = cv2.inRange(
+        hsv,
+        red_lower_2,
+        red_upper_2
+    )
+
+    red_mask = cv2.bitwise_or(
+        red_mask_1,
+        red_mask_2
+    )
+
+    green_lower = np.array(
+        [30, 45, 35],
+        dtype=np.uint8
+    )
+
+    green_upper = np.array(
+        [90, 255, 255],
+        dtype=np.uint8
+    )
+
+    green_mask = cv2.inRange(
+        hsv,
+        green_lower,
+        green_upper
+    )
+
+    yellow_lower = np.array(
+        [15, 60, 60],
+        dtype=np.uint8
+    )
+
+    yellow_upper = np.array(
+        [38, 255, 255],
+        dtype=np.uint8
+    )
+
+    yellow_mask = cv2.inRange(
+        hsv,
+        yellow_lower,
+        yellow_upper
+    )
+
+    candidate_mask = cv2.bitwise_or(
+        red_mask,
+        green_mask
+    )
+
+    candidate_mask = cv2.bitwise_or(
+        candidate_mask,
+        yellow_mask
+    )
+
+    candidate_mask = apply_opening(
+        candidate_mask
+    )
+
+    candidate_mask = apply_closing(
+        candidate_mask
+    )
+
+    return candidate_mask
+
+
+def segment_background_with_steps(
+    image: np.ndarray
+) -> dict:
 
     if image is None or image.size == 0:
         raise ValueError("Input image is empty.")
 
-    if image.ndim != 3 or image.shape[2] != 3:
-        raise ValueError(
-            "grabcut_segmentation expects a BGR image "
-            "with 3 channels."
-        )
-
     height, width = image.shape[:2]
 
-    # Initialise GrabCut mask.
-    grabcut_mask = np.zeros(
+    candidate_mask = create_apple_candidate_mask(
+        image
+    )
+
+    grabcut_labels = np.full(
         (height, width),
+        cv2.GC_PR_BGD,
         dtype=np.uint8
     )
 
-    # Calculate margins around the image.
-    inset_x = max(
+    grabcut_labels[
+        candidate_mask > 0
+    ] = cv2.GC_PR_FGD
+
+    border = max(
         1,
-        int(width * inset_ratio)
+        int(min(height, width) * 0.01)
     )
 
-    inset_y = max(
-        1,
-        int(height * inset_ratio)
-    )
+    grabcut_labels[
+        :border,
+        :
+    ] = cv2.GC_BGD
 
-    rectangle_width = max(
-        1,
-        width - (2 * inset_x)
-    )
+    grabcut_labels[
+        -border:,
+        :
+    ] = cv2.GC_BGD
 
-    rectangle_height = max(
-        1,
-        height - (2 * inset_y)
-    )
+    grabcut_labels[
+        :,
+        :border
+    ] = cv2.GC_BGD
 
-    # Initial GrabCut rectangle.
-    rectangle = (
-        inset_x,
-        inset_y,
-        rectangle_width,
-        rectangle_height
-    )
+    grabcut_labels[
+        :,
+        -border:
+    ] = cv2.GC_BGD
 
-    # Models required internally by GrabCut.
     background_model = np.zeros(
         (1, 65),
         dtype=np.float64
@@ -219,262 +237,144 @@ def grabcut_segmentation(
         dtype=np.float64
     )
 
-    # Perform GrabCut.
-    cv2.grabCut(
-        image,
-        grabcut_mask,
-        rectangle,
-        background_model,
-        foreground_model,
-        iterations,
-        cv2.GC_INIT_WITH_RECT
+    candidate_pixels = cv2.countNonZero(
+        candidate_mask
     )
 
-    # Convert GrabCut labels into a binary mask.
-    foreground_mask = np.where(
+    if candidate_pixels == 0:
+        empty_mask = np.zeros(
+            (height, width),
+            dtype=np.uint8
+        )
+
+        return {
+            "candidate_mask": candidate_mask,
+            "grabcut_mask": empty_mask,
+            "closed_mask": empty_mask,
+            "segmented": image.copy(),
+            "segmentation_success": False
+        }
+
+    cv2.grabCut(
+        image,
+        grabcut_labels,
+        None,
+        background_model,
+        foreground_model,
+        5,
+        cv2.GC_INIT_WITH_MASK
+    )
+
+    grabcut_mask = np.where(
         (
-            grabcut_mask == cv2.GC_FGD
+            grabcut_labels == cv2.GC_FGD
         )
         |
         (
-            grabcut_mask == cv2.GC_PR_FGD
+            grabcut_labels == cv2.GC_PR_FGD
         ),
         255,
         0
     ).astype(np.uint8)
 
-    # Apply mask to the image.
-    segmented_image = cv2.bitwise_and(
-        image,
-        image,
-        mask=foreground_mask
+    grabcut_mask = apply_opening(
+        grabcut_mask
     )
 
-    return segmented_image, foreground_mask
-
-
-def segment_background(image: np.ndarray) -> np.ndarray:
-    """Return a background-segmented image for legacy callers."""
-
-    segmented_image, foreground_mask = grabcut_segmentation(image)
-    closed_mask = apply_closing(foreground_mask)
-    return apply_mask(image, closed_mask)
-
-
-# ============================================================
-# 4. MORPHOLOGICAL CLOSING
-# ============================================================
-
-def apply_closing(
-    mask: np.ndarray,
-    kernel_size: tuple[int, int] = (5, 5)
-) -> np.ndarray:
-    """
-    Apply morphological closing to a binary mask.
-
-    Closing consists of:
-
-    Dilation
-        followed by
-    Erosion
-
-    It is useful for filling small holes and connecting
-    small gaps inside segmented foreground regions.
-
-    Parameters
-    ----------
-    mask : np.ndarray
-        Binary foreground mask.
-
-    kernel_size : tuple[int, int]
-        Size of the elliptical structuring element.
-
-    Returns
-    -------
-    np.ndarray
-        Refined binary mask.
-    """
-
-    if mask is None or mask.size == 0:
-        raise ValueError("Input mask is empty.")
-
-    if mask.ndim != 2:
-        raise ValueError(
-            "apply_closing expects a single-channel binary mask."
-        )
-
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        kernel_size
-    )
-
-    closed_mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_CLOSE,
-        kernel
-    )
-
-    return closed_mask
-
-
-# ============================================================
-# 5. APPLY MASK TO IMAGE
-# ============================================================
-
-def apply_mask(
-    image: np.ndarray,
-    mask: np.ndarray
-) -> np.ndarray:
-    """
-    Apply a binary mask to a BGR image.
-
-    Parameters
-    ----------
-    image : np.ndarray
-        Input BGR image.
-
-    mask : np.ndarray
-        Binary mask.
-
-    Returns
-    -------
-    np.ndarray
-        Masked BGR image.
-    """
-
-    if image is None or image.size == 0:
-        raise ValueError("Input image is empty.")
-
-    if mask is None or mask.size == 0:
-        raise ValueError("Input mask is empty.")
-
-    if image.shape[:2] != mask.shape[:2]:
-        raise ValueError(
-            "Image and mask dimensions must match."
-        )
-
-    masked_image = cv2.bitwise_and(
-        image,
-        image,
-        mask=mask
-    )
-
-    return masked_image
-
-
-# ============================================================
-# 6. COMPLETE MODULE 1 PREPROCESSING PIPELINE
-# ============================================================
-
-def preprocess_image(
-    image: np.ndarray
-) -> np.ndarray:
-    """
-    Perform the complete Module 1 preprocessing pipeline.
-
-    Pipeline
-    --------
-    1. Resize image to 224 x 224
-    2. Apply CLAHE contrast enhancement
-    3. Perform GrabCut background segmentation
-    4. Apply morphological closing
-    5. Apply the refined mask to the CLAHE image
-
-    Parameters
-    ----------
-    image : np.ndarray
-        Original BGR image.
-
-    Returns
-    -------
-    np.ndarray
-        Final preprocessed BGR image.
-    """
-
-    # Step 1: Resize image.
-    resized_image = resize_image(
-        image
-    )
-
-    # Step 2: Apply CLAHE.
-    clahe_image = apply_clahe(
-        resized_image
-    )
-
-    # Step 3: Perform GrabCut segmentation.
-    _, foreground_mask = grabcut_segmentation(
-        clahe_image
-    )
-
-    # Step 4: Refine the mask using morphological closing.
-    closed_mask = apply_closing(
-        foreground_mask
-    )
-
-    # Step 5: Apply final refined mask.
-    final_image = apply_mask(
-        clahe_image,
-        closed_mask
-    )
-
-    return final_image
-
-
-# ============================================================
-# 7. COMPLETE PIPELINE WITH INTERMEDIATE RESULTS
-# ============================================================
-
-def preprocess_image_with_steps(
-    image: np.ndarray
-) -> dict:
-    """
-    Perform the preprocessing pipeline and return all
-    intermediate processing results.
-
-    This function is useful for:
-    - Streamlit visualisation
-    - Testing
-    - Demonstration
-    - Assignment screenshots
-
-    Returns
-    -------
-    dict
-        Dictionary containing all processing stages.
-    """
-
-    # Step 1
-    resized_image = resize_image(
-        image
-    )
-
-    # Step 2
-    clahe_image = apply_clahe(
-        resized_image
-    )
-
-    # Step 3
-    segmented_image, grabcut_mask = grabcut_segmentation(
-        clahe_image
-    )
-
-    # Step 4
     closed_mask = apply_closing(
         grabcut_mask
     )
 
-    # Step 5
-    final_image = apply_mask(
-        clahe_image,
+    foreground_pixels = cv2.countNonZero(
         closed_mask
     )
 
+    total_pixels = height * width
+
+    foreground_ratio = (
+        foreground_pixels
+        / total_pixels
+    )
+
+    MIN_FOREGROUND_RATIO = 0.01
+
+    if foreground_ratio < MIN_FOREGROUND_RATIO:
+        segmented_image = image.copy()
+        segmentation_success = False
+
+    else:
+        segmented_image = cv2.bitwise_and(
+            image,
+            image,
+            mask=closed_mask
+        )
+
+        segmentation_success = True
+
     return {
-        "original": image,
-        "resized": resized_image,
-        "clahe": clahe_image,
-        "grabcut": segmented_image,
+        "candidate_mask": candidate_mask,
         "grabcut_mask": grabcut_mask,
         "closed_mask": closed_mask,
-        "final": final_image,
+        "segmented": segmented_image,
+        "segmentation_success": segmentation_success
     }
+
+
+def segment_background(
+    image: np.ndarray
+) -> np.ndarray:
+
+    results = segment_background_with_steps(
+        image
+    )
+
+    return results["segmented"]
+
+
+def preprocess_image_with_steps(
+    image: np.ndarray
+) -> dict:
+
+    if image is None or image.size == 0:
+        raise ValueError("Input image is empty.")
+
+    resized = resize_image(
+        image
+    )
+
+    clahe = apply_clahe(
+        resized
+    )
+
+    segmentation = segment_background_with_steps(
+        clahe
+    )
+
+    return {
+        "resized": resized,
+        "clahe": clahe,
+        "candidate_mask": segmentation[
+            "candidate_mask"
+        ],
+        "grabcut_mask": segmentation[
+            "grabcut_mask"
+        ],
+        "closed_mask": segmentation[
+            "closed_mask"
+        ],
+        "segmentation_success": segmentation[
+            "segmentation_success"
+        ],
+        "final": segmentation[
+            "segmented"
+        ]
+    }
+
+
+def preprocess_image(
+    image: np.ndarray
+) -> np.ndarray:
+
+    return preprocess_image_with_steps(
+        image
+    )["final"]
