@@ -20,6 +20,15 @@ from module.classification import predict_ripeness
 
 st.title("Apple Ripeness System")
 
+CLASS_ORDER = ["20%", "40%", "60%", "80%", "100%", "Overripe"]
+
+
+def get_display_order(present_classes):
+    """Return class labels ordered by ripeness progression."""
+    ordered = [label for label in CLASS_ORDER if label in present_classes]
+    extras = [label for label in present_classes if label not in CLASS_ORDER]
+    return ordered + extras
+
 
 def process_image(img, original_path):
 
@@ -178,7 +187,9 @@ def process_image(img, original_path):
 
             if classification.get("probabilities"):
                 st.write("Class probabilities:")
-                for label, probability in classification["probabilities"].items():
+                ordered_labels = get_display_order(classification["probabilities"].keys())
+                for label in ordered_labels:
+                    probability = classification["probabilities"][label]
                     st.caption(f"- {label}: {probability:.2%}")
              
         st.divider()

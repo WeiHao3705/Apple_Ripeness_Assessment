@@ -20,28 +20,49 @@ from sklearn.metrics import classification_report, confusion_matrix, accuracy_sc
 # Setup: import the shared preprocessing module
 # ---------------------------------------------------------------------------
 # Allows "Model Training/SVM.py" to import from the sibling "module/" folder.
-def find_module_dir(start: Path) -> Path:
-    """
-    Walk upward from `start` looking for a folder named "module" that
-    contains preprocessing.py. This makes the script location-independent -
-    it keeps working whether the script sits directly in "Model Training/"
-    or in a subfolder like "Model Training/CNN/", as long as "module/" is
-    somewhere in a parent directory.
-    """
+import importlib
+
+
+def find_preprocessing_module():
+    start = Path(__file__).resolve().parent
+    preprocessing_path = None
     for parent in [start] + list(start.parents):
-        candidate = parent / "module"
-        if (candidate / "preprocessing.py").exists():
-            return candidate
-    raise FileNotFoundError(
-        f"Could not find a 'module' folder containing preprocessing.py "
-        f"above {start}. Check your folder structure."
-    )
+        matches = list(parent.rglob("preprocessing.py"))
+        if matches:
+            preprocessing_path = matches[0]
+            break
+
+    if preprocessing_path is None:
+        raise FileNotFoundError(
+            f"Could not find a 'preprocessing.py' file anywhere above {start}. "
+            f"Check your folder structure."
+        )
+
+    package_dir = preprocessing_path.parent
+    package_name = package_dir.name
+    parent_of_package = str(package_dir.parent)
+
+    # Try package-style import FIRST (e.g. "Module1.preprocessing"). This
+    # works whether or not Module1 has an __init__.py - Python 3 supports
+    # "namespace packages" without one - and is REQUIRED if preprocessing.py
+    # uses relative imports internally (e.g. "from .config import ...").
+    if parent_of_package not in sys.path:
+        sys.path.insert(0, parent_of_package)
+    try:
+        return importlib.import_module(f"{package_name}.preprocessing")
+    except ImportError:
+        pass
+
+    # Fall back to flat-file import (old style, no internal relative imports).
+    dir_str = str(package_dir)
+    if dir_str not in sys.path:
+        sys.path.insert(0, dir_str)
+    return importlib.import_module("preprocessing")
 
 
-MODULE_DIR = find_module_dir(Path(__file__).resolve().parent)
-sys.path.append(str(MODULE_DIR))
- 
-from preprocessing import segment_background, apply_clahe  # noqa: E402
+_preprocessing = find_preprocessing_module()
+segment_background = _preprocessing.segment_background
+apply_clahe = _preprocessing.apply_clahe
  
  
 # ---------------------------------------------------------------------------
