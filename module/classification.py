@@ -21,9 +21,13 @@ def _validate_image(image: np.ndarray) -> None:
         raise ValueError("predict_ripeness expects a BGR image with 3 channels.")
 
 
-def _prepare_image(image: np.ndarray) -> np.ndarray:
+def _prepare_image(image: np.ndarray, fast: bool = False) -> np.ndarray:
     resized = cv2.resize(image, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
-    return extract_features(preprocess_image(resized)).reshape(1, -1)
+    if fast:
+        processed = preprocess_image_fast(resized)
+    else:
+        processed = preprocess_image(resized)
+    return extract_features(processed).reshape(1, -1)
 
 
 def extract_color_features(image: np.ndarray, bins: int = 32) -> np.ndarray:
@@ -76,6 +80,21 @@ def preprocess_image(image: np.ndarray) -> np.ndarray:
     return apply_clahe(segment_background(image))
 
 
+def preprocess_image_fast(image: np.ndarray) -> np.ndarray:
+    """Approximate the training preprocessing without iterative GrabCut.
+
+    Live-camera ROIs have already been localized by the detector, so the HSV
+    candidate mask is sufficient to remove most of the background.  Avoiding
+    GrabCut here makes live inference several times faster while preserving
+    the feature layout expected by the trained SVM.
+    """
+    from module.Module1.preprocessing import apply_clahe, create_apple_candidate_mask
+
+    candidate_mask = create_apple_candidate_mask(image)
+    segmented = cv2.bitwise_and(image, image, mask=candidate_mask)
+    return apply_clahe(segmented)
+
+
 @lru_cache(maxsize=1)
 def _load_artifacts():
     if not MODEL_PATH.exists():
@@ -89,11 +108,12 @@ def _load_artifacts():
     return model, encoder
 
 
-def predict_ripeness(image: np.ndarray) -> dict:
+def predict_ripeness(image: np.ndarray, *, fast: bool = False) -> dict:
+    """Predict ripeness, optionally using the low-latency live-camera path."""
     _validate_image(image)
     model, encoder = _load_artifacts()
 
-    model_input = _prepare_image(image)
+    model_input = _prepare_image(image, fast=fast)
     probabilities = model.predict_proba(model_input)[0]
     predicted_index = int(np.argmax(probabilities))
     classes = list(encoder.classes_)

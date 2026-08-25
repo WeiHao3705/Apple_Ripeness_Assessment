@@ -18,9 +18,21 @@ from module.object_detection import (
 from module.classification import predict_ripeness
 
 
+st.set_page_config(
+    page_title="Apple Ripeness System",
+    layout="centered",
+)
+
 st.title("Apple Ripeness System")
 
 CLASS_ORDER = ["20%", "40%", "60%", "80%", "100%", "Overripe"]
+
+
+def use_white_segmented_background(image, foreground_mask):
+    """Composite a segmented BGR image onto a white background."""
+    white_background = image.copy()
+    white_background[:] = 255
+    return cv2.copyTo(image, foreground_mask, white_background)
 
 
 def get_display_order(present_classes):
@@ -40,6 +52,12 @@ def process_image(img, original_path):
         steps = preprocess_image_with_steps(img)
         preprocessed_img = steps.final
 
+        if steps.segmentation_success:
+            preprocessed_img = use_white_segmented_background(
+                preprocessed_img,
+                steps.refined_mask,
+            )
+
     except (ValueError, cv2.error) as exc:
         st.error(f"Image preprocessing failed: {exc}")
         return
@@ -50,68 +68,54 @@ def process_image(img, original_path):
     )
 
     # =========================================================
-    # DISPLAY PREPROCESSING RESULTS
+    # DISPLAY EVERY PREPROCESSING STAGE
     # =========================================================
 
-    st.subheader("Preprocessing Results")
+    st.subheader("Complete Preprocessing Results")
+    st.caption(
+        "The stages below are shown in processing order. The final image is "
+        "the input passed to apple detection and ripeness classification."
+    )
 
-    col1, col2, col3 = st.columns(3)
+    preprocessing_stages = [
+        ("1. Original image", steps.original, "BGR"),
+        ("2. Resized and letterboxed (224 × 224)", steps.resized, "BGR"),
+        ("3. CLAHE contrast enhancement", steps.clahe, "BGR"),
+        ("4. HSV apple-colour candidate mask", steps.hsv_candidate_mask, None),
+        ("5. GrabCut foreground mask", steps.grabcut_mask, None),
+        ("6. Refined mask after morphological closing", steps.refined_mask, None),
+        ("7. Segmented foreground", steps.final, "BGR"),
+        ("8. Final preprocessing output", preprocessed_img, "BGR"),
+    ]
 
-    with col1:
-        st.image(
-            steps.resized,
-            channels="BGR",
-            caption="Resized (224 × 224)",
-            use_container_width=True
+    for row_start in range(0, len(preprocessing_stages), 3):
+        columns = st.columns(3)
+        row_stages = preprocessing_stages[row_start:row_start + 3]
+
+        for column, (caption, stage_image, channels) in zip(columns, row_stages):
+            with column:
+                image_options = {
+                    "caption": caption,
+                    "use_container_width": True,
+                }
+                if channels is None:
+                    image_options["clamp"] = True
+                else:
+                    image_options["channels"] = channels
+                st.image(stage_image, **image_options)
+
+    foreground_percent = steps.foreground_ratio * 100.0
+    if steps.segmentation_success:
+        st.success(
+            f"Background segmentation succeeded — foreground occupies "
+            f"{foreground_percent:.1f}% of the processed image."
         )
-
-    with col2:
-        st.image(
-            steps.clahe,
-            channels="BGR",
-            caption="CLAHE Enhanced",
-            use_container_width=True
+    else:
+        reason = steps.fallback_reason or "No reliable foreground was found."
+        st.warning(
+            f"Background segmentation used the fallback image "
+            f"({foreground_percent:.1f}% foreground): {reason}"
         )
-
-    with col3:
-        st.image(
-            preprocessed_img,
-            channels="BGR",
-            caption="Final Preprocessed Image",
-            use_container_width=True
-        )
-
-    # =========================================================
-    # SHOW GRABCUT + CLOSING MASK
-    # =========================================================
-
-    with st.expander("Show preprocessing masks"):
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.image(
-                steps.hsv_candidate_mask,
-                caption="Apple Colour Candidate Mask",
-                clamp=True,
-                use_container_width=True
-            )
-
-        with col2:
-            st.image(
-                steps.grabcut_mask,
-                caption="GrabCut Mask",
-                clamp=True,
-                use_container_width=True
-            )
-
-        with col3:
-            st.image(
-                steps.refined_mask,
-                caption="Mask After Closing",
-                clamp=True,
-                use_container_width=True
-            )
 
     # =========================================================
     # MODULE 2 — OBJECT DETECTION
@@ -248,7 +252,8 @@ option = st.selectbox(
     [
         "Single Upload",
         "Batch Upload",
-        "Camera"
+        "Camera",
+        "Live Camera",
     ]
 )
 
@@ -297,3 +302,20 @@ elif option == "Camera":
     if result is not None:
         img, original_path = result
         process_image(img, original_path)
+
+
+# =============================================================
+# LIVE CAMERA
+# =============================================================
+
+elif option == "Live Camera":
+
+    try:
+        from module.Module1.live_camera import live_camera_classification
+    except ImportError:
+        st.error(
+            "Live Camera requires additional packages. "
+            "Please install them with: pip install streamlit-webrtc av"
+        )
+    else:
+        live_camera_classification()

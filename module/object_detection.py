@@ -143,17 +143,19 @@ def detect_edges(segmented_img: np.ndarray):
     normalized = clahe.apply(gray)
     smoothed = cv.bilateralFilter(normalized, d=7, sigmaColor=50, sigmaSpace=50)
 
-    nonzero_pixels = smoothed[smoothed > 0]
-    if nonzero_pixels.size == 0:
-        nonzero_pixels = smoothed.flatten()
+    # Successful preprocessing now presents the segmented result on a white
+    # background. Exclude that background when selecting adaptive thresholds.
+    foreground_pixels = smoothed[gray < 250]
+    if foreground_pixels.size == 0:
+        foreground_pixels = smoothed.flatten()
 
-    median_intensity = float(np.median(nonzero_pixels))
+    median_intensity = float(np.median(foreground_pixels))
     lower = int(max(20, 0.66 * median_intensity))
     upper = int(min(220, 1.33 * median_intensity))
 
     edges = cv.Canny(smoothed, lower, upper)
     
-    foreground_mask = np.where(gray > 5, 255, 0).astype(np.uint8)
+    foreground_mask = np.where(gray < 250, 255, 0).astype(np.uint8)
     kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (3, 3))
     foreground_mask = cv.morphologyEx(foreground_mask, cv.MORPH_OPEN, kernel)
     foreground_mask = cv.morphologyEx(foreground_mask, cv.MORPH_CLOSE, kernel)
