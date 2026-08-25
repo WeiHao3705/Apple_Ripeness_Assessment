@@ -167,7 +167,14 @@ def process_image(img, original_path):
         apple_id = apple["id"]
         
         # Crop the specific apple from the original preprocessed image
-        apple_roi = preprocessed_img[y:y+h, x:x+w]
+        # Crop from `steps.resized` (letterboxed, but BEFORE CLAHE/GrabCut),
+        # not from `preprocessed_img` (which already went through CLAHE + GrabCut
+        # + white-background compositing). detect_objects() needs the fully
+        # processed image to find the apple, but predict_ripeness() needs a
+        # clean crop to run ITS OWN single-pass preprocessing on - otherwise the
+        # apple gets CLAHE'd and GrabCut'd twice, which does not match training
+        # and was producing a systematic bias toward Overripe.
+        apple_roi = steps.resized[y:y+h, x:x+w]
 
         classification = {
             "label": "Unknown",
