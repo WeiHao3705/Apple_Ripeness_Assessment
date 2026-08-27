@@ -13,6 +13,7 @@ if str(UI_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(UI_DIRECTORY))
 
 from image_pipeline import ImageAnalysis, analyse_image
+from login import require_login_or_guest
 
 st.set_page_config(
     page_title="Apple Ripeness System",
@@ -21,12 +22,30 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Do not render any classifier controls until the visitor signs in with
+# Google or explicitly chooses guest mode.
+require_login_or_guest()
+
 
 def render_sidebar() -> None:
     """Display the prototype navigation menu."""
     with st.sidebar:
         st.title("🍎 Apple Ripeness")
         st.caption("Recognition System")
+        st.divider()
+
+        if st.user.is_logged_in:
+            st.success(f"Signed in as {st.user.name}")
+            st.button("Log out", use_container_width=True, on_click=st.logout)
+        else:
+            st.info("Guest mode")
+            st.caption("Your classification history will not be saved.")
+            st.button(
+                "Sign in to save history",
+                use_container_width=True,
+                on_click=_return_guest_to_login,
+            )
+
         st.divider()
 
         st.radio(
@@ -39,6 +58,11 @@ def render_sidebar() -> None:
 
         st.divider()
         st.caption("Image processing connected")
+
+
+def _return_guest_to_login() -> None:
+    """Leave guest mode so the login screen is shown on the next rerun."""
+    st.session_state.guest_mode = False
 
 
 def render_scan_input() -> bytes | None:

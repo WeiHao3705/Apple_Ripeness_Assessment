@@ -1,0 +1,10 @@
+streamlit[auth]>=1.62,<2
+opencv-python-headless
+numpy
+Pillow
+joblib
+scikit-image
+scikit-learn
+streamlit-webrtc
+av
+aiortc

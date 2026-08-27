@@ -1,6 +1,8 @@
 import cv2
 import streamlit as st
 
+from UI.login import show_auth_entry
+
 from module.Module1.image_acquisition import (
     upload_single_image,
     upload_batch_images,
@@ -20,8 +22,13 @@ from module.classification import predict_ripeness
 
 st.set_page_config(
     page_title="Apple Ripeness System",
+    page_icon="🍎",
     layout="centered",
 )
+
+# Temporary authentication-only entry. This currently ends the Streamlit run
+# on the placeholder page, leaving the existing classifier below untouched.
+show_auth_entry()
 
 st.title("Apple Ripeness System")
 
