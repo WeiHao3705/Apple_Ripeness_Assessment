@@ -39,22 +39,13 @@ class SelectedImage:
 
 
 def load_app_styles() -> None:
-    """Load the standalone stylesheet used by the signed-in application."""
+    """Load the application stylesheet in a rerun-stable page element."""
     stylesheet = (UI_DIRECTORY / "styles.css").read_text(encoding="utf-8")
-    st.html(f"<style>{stylesheet}</style>")
-
-st.set_page_config(
-    page_title="Apple Ripeness System",
-    page_icon="🍎",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# Do not render any classifier controls until the visitor signs in with
-# Google or explicitly chooses guest mode.
-require_login_or_guest()
-load_app_styles()
-
+    # ``st.html`` moves style-only content into Streamlit's event container.
+    # Community Cloud can clear that transient container during a widget rerun,
+    # which leaves the app rendered with only the default Streamlit theme.
+    # A Markdown element remains in the normal page tree across reruns.
+    st.markdown(f"<style>{stylesheet}</style>", unsafe_allow_html=True)
 
 def render_sidebar() -> str:
     """Display the prototype navigation menu."""
@@ -606,6 +597,21 @@ def render_about_page() -> None:
 
 def main() -> None:
     """Start the standalone user-interface prototype."""
+    # This module is imported by the root ``app.py`` entry point and remains
+    # cached between Streamlit widget reruns. Keep every Streamlit page setup
+    # call inside ``main`` so it is emitted again on each rerun.
+    st.set_page_config(
+        page_title="Apple Ripeness System",
+        page_icon="🍎",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+    # Do not render classifier controls until the visitor signs in with Google
+    # or explicitly chooses guest mode.
+    require_login_or_guest()
+    load_app_styles()
+
     selected_page = render_sidebar()
 
     if selected_page == "History":
