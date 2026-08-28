@@ -39,43 +39,56 @@ class SelectedImage:
 
 
 def load_app_styles() -> None:
-    """Load the application stylesheet in a rerun-stable page element."""
-    stylesheet = (UI_DIRECTORY / "styles.css").read_text(encoding="utf-8")
-    # ``st.html`` moves style-only content into Streamlit's event container.
-    # Community Cloud can clear that transient container during a widget rerun,
-    # which leaves the app rendered with only the default Streamlit theme.
-    # A Markdown element remains in the normal page tree across reruns.
-    st.markdown(f"<style>{stylesheet}</style>", unsafe_allow_html=True)
+    """Load the application stylesheet on every Streamlit rerun."""
+    st.html(UI_DIRECTORY / "styles.css")
+
+
+APPLE_MARK_HTML = '<span class="apple-shape"><i></i></span>'
 
 def render_sidebar() -> str:
     """Display the prototype navigation menu."""
     with st.sidebar:
-        st.title("🍎 Apple Ripeness")
-        st.caption("Recognition System")
+        st.html(
+            '<div class="brand-lockup">'
+            f'<div class="brand-mark">{APPLE_MARK_HTML}</div>'
+            '<div><strong>Apple Ripeness</strong>'
+            '<span>Vision assessment</span></div>'
+            '</div>'
+        )
         st.divider()
 
         if is_logged_in():
-            st.success(f"Signed in as {current_user_name()}")
+            st.html(
+                '<div class="session-chip session-chip--signed">'
+                '<span></span><div><b>Signed in</b>'
+                f'<small>{html.escape(current_user_name())}</small></div></div>'
+            )
             st.button("Log out", width="stretch", on_click=logout)
         else:
-            st.info("Guest mode")
-            st.caption("Your classification history will not be saved.")
+            st.html(
+                '<div class="session-chip"><span></span>'
+                '<div><b>Guest mode</b><small>History off</small></div></div>'
+            )
             st.button(
-                "Sign in to save history",
+                "Sign in",
                 width="stretch",
                 on_click=_return_guest_to_login,
             )
 
         st.divider()
 
+        navigation_labels = {
+            "scan": ":material/camera_enhance: Scan apple",
+            "history": ":material/history: History",
+            "about": ":material/info: About",
+        }
         selected_page = st.radio(
             "Navigation",
-            ["Scan Apple", "History", "About"],
+            options=navigation_labels,
+            format_func=navigation_labels.get,
             index=0,
+            label_visibility="collapsed",
         )
-
-        st.divider()
-        st.caption("Image processing · Supabase Auth · Private history")
 
     return selected_page
 
@@ -116,16 +129,16 @@ def _clear_analysis_state() -> None:
 
 def render_scan_input() -> list[SelectedImage]:
     """Display the selected input control and return its still images."""
-    st.subheader("Choose an input method")
+    st.subheader("Input")
 
     input_method = st.segmented_control(
         "Input method",
         options=["photo", "upload", "live"],
         default="photo",
         format_func={
-            "photo": "📷 Take a photo",
-            "upload": "🖼️ Upload images",
-            "live": "🎥 Live camera",
+            "photo": ":material/photo_camera: Take a photo",
+            "upload": ":material/upload_file: Upload images",
+            "live": ":material/videocam: Live camera",
         }.get,
         key="scan_input_method",
         on_change=_clear_analysis_state,
@@ -135,7 +148,6 @@ def render_scan_input() -> list[SelectedImage]:
 
     if input_method == "photo":
         camera_image = None
-        st.write("Use your device camera to take a clear picture of the apple.")
         _render_camera_security_notice()
 
         photo_camera_state_key = "apple_photo_camera_requested"
@@ -169,7 +181,7 @@ def render_scan_input() -> list[SelectedImage]:
 
         st.html(
             '<div class="camera-guide"><span></span>'
-            "Align one apple inside the guide</div>"
+            "Center one apple</div>"
         )
         if st.session_state[photo_camera_state_key]:
             with st.container(key="camera-scan-stage"):
@@ -178,9 +190,6 @@ def render_scan_input() -> list[SelectedImage]:
                     key="apple-photo-camera",
                     resolution="720p",
                 )
-        else:
-            st.caption("Click **Start camera** to take an apple photo.")
-
         if camera_image is not None:
             return [
                 SelectedImage(
@@ -192,9 +201,8 @@ def render_scan_input() -> list[SelectedImage]:
         return []
 
     if input_method == "upload":
-        st.write("Select one or more JPG or PNG images from your device.")
         uploaded_images = st.file_uploader(
-            "Upload apple images",
+            "Drop apple images",
             type=["jpg", "jpeg", "png"],
             accept_multiple_files=True,
             key="apple_images",
@@ -221,14 +229,7 @@ def render_scan_input() -> list[SelectedImage]:
         return []
 
     if input_method == "live":
-        st.write(
-            "Start the live camera to detect and classify apples continuously."
-        )
         _render_camera_security_notice()
-        st.caption(
-            "Live-camera frames are processed in real time and are not saved "
-            "to History. Capture a photo to save an assessment."
-        )
         try:
             from module.Module1.live_camera import live_camera_classification
         except (ImportError, ValueError) as exc:
@@ -384,7 +385,7 @@ def _selected_images_hash(selected_images: list[SelectedImage]) -> str | None:
 
 def render_result_panel(selected_images: list[SelectedImage]) -> None:
     """Run the pipeline on demand for one image or a complete upload batch."""
-    st.subheader("Analysis result")
+    st.subheader("Result")
 
     image_hash = _selected_images_hash(selected_images)
 
@@ -397,7 +398,7 @@ def render_result_panel(selected_images: list[SelectedImage]) -> None:
 
     with st.container(border=True):
         if not selected_images:
-            st.info("Capture or upload an apple image to begin.")
+            st.info("Waiting for an image")
         elif len(selected_images) > 1:
             st.info(f"Ready to analyse {len(selected_images)} uploaded images.")
 
@@ -405,7 +406,7 @@ def render_result_panel(selected_images: list[SelectedImage]) -> None:
             (
                 f"Analyse {len(selected_images)} images"
                 if len(selected_images) > 1
-                else "Analyse apple"
+                else "Analyse"
             ),
             type="primary",
             width="stretch",
@@ -614,36 +615,34 @@ def main() -> None:
 
     selected_page = render_sidebar()
 
-    if selected_page == "History":
+    if selected_page == "history":
         render_history_page()
         return
-    if selected_page == "About":
+    if selected_page == "about":
         render_about_page()
         return
 
     st.html(
         '<section class="app-hero">'
-        "<div>"
-        '<div class="hero-kicker">Computer vision assessment</div>'
-        "<h1>Apple Ripeness Recognition</h1>"
-        "<p>Capture or upload an apple image to detect fruit, assess its "
-        "ripeness, and securely save the result to your private history.</p>"
+        '<div class="hero-copy">'
+        '<div class="hero-kicker">Computer vision</div>'
+        "<h1>Apple Ripeness</h1>"
+        "<p>Capture. Detect. Assess.</p>"
         "</div>"
-        '<div class="hero-orb" aria-hidden="true">🍎</div>'
+        '<div class="hero-visual" aria-hidden="true">'
+        '<div class="scan-ring scan-ring--outer"></div>'
+        '<div class="scan-ring scan-ring--inner"></div>'
+        f'<div class="hero-apple">{APPLE_MARK_HTML}</div>'
+        '<div class="vision-chip">AI vision <b>online</b></div>'
+        '</div>'
         "</section>"
     )
 
-    input_column, result_column = st.columns([1.42, 1], gap="large")
+    with st.container(key="scan-workspace"):
+        input_column, result_column = st.columns([1.42, 1], gap="large")
 
-    with input_column:
-        selected_images = render_scan_input()
+        with input_column:
+            selected_images = render_scan_input()
 
-    with result_column:
-        render_result_panel(selected_images)
-
-    st.divider()
-    st.caption(
-        "Photo preprocessing, apple detection, ripeness classification, live "
-        "camera analysis, Supabase authentication, and private history storage "
-        "are connected."
-    )
+        with result_column:
+            render_result_panel(selected_images)

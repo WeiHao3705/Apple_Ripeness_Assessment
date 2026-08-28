@@ -501,8 +501,6 @@ class ApplePredictionProcessor:
 def live_camera_classification() -> None:
     """Render the Live Camera screen (FR-LC-01 .. FR-LC-15)."""
 
-    st.info("Point the camera at one or more apples — every apple in view will be detected and classified.")
-
     playing_state_key = "apple_live_camera_requested"
     if playing_state_key not in st.session_state:
         st.session_state[playing_state_key] = False
@@ -571,11 +569,6 @@ def live_camera_classification() -> None:
     if not ctx.state.playing:
         if st.session_state[playing_state_key]:
             st.caption("Connecting to the camera…")
-        else:
-            st.caption(
-                "Click **Start camera** above and allow camera access to begin. "
-                "Use the fixed **Stop camera** button to end the stream."
-            )
         return
 
     result_placeholder = st.empty()
@@ -593,7 +586,7 @@ def live_camera_classification() -> None:
 
         with result_placeholder.container():
             if not results:
-                st.info("No apples detected. Point the camera at one or more apples.")
+                st.info("No apple detected")
             for pred in results:
                 if pred.status == "confirmed":
                     st.success(f"Apple {pred.track_id}: **{pred.label}** — {pred.confidence:.0%}")
