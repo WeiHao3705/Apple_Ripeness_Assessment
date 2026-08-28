@@ -528,25 +528,6 @@ def live_camera_classification() -> None:
     def stop_camera() -> None:
         st.session_state[playing_state_key] = False
 
-    def change_camera_side() -> None:
-        # Mobile browsers need the active track released before they can open
-        # the other physical camera.
-        st.session_state[playing_state_key] = False
-
-    facing_mode = st.segmented_control(
-        "Camera side",
-        options=["environment", "user"],
-        default="environment",
-        required=True,
-        format_func={
-            "environment": "🔄 Back camera",
-            "user": "🤳 Front camera",
-        }.get,
-        key="apple-live-camera-facing",
-        on_change=change_camera_side,
-        width="stretch",
-    )
-
     start_column, stop_column = st.columns(2)
     with start_column:
         st.button(
@@ -567,16 +548,17 @@ def live_camera_classification() -> None:
         )
 
     ctx = webrtc_streamer(
-        key=f"apple-live-camera-{facing_mode}",
+        key="apple-live-camera",
         mode=WebRtcMode.SENDRECV,
         desired_playing_state=st.session_state[playing_state_key],
         rtc_configuration=_get_rtc_configuration(),
         video_processor_factory=ApplePredictionProcessor,
         media_stream_constraints={
             "video": {
-                # Prefer the selected phone lens without making it a hard
-                # requirement, so desktop webcams remain supported.
-                "facingMode": {"ideal": facing_mode},
+                # Phones should open the rear camera. Keep this preference
+                # non-mandatory so PCs, which do not expose a "back" camera,
+                # can fall back to their normal webcam.
+                "facingMode": {"ideal": "environment"},
                 "width": {"ideal": CAMERA_WIDTH},
                 "height": {"ideal": CAMERA_HEIGHT},
                 "frameRate": {"ideal": CAMERA_FPS},

@@ -143,7 +143,10 @@ def render_scan_input() -> SelectedImage | None:
         return None
 
     if input_method == "camera":
-        st.write("Use your device camera to take a clear picture of the apple.")
+        st.write(
+            "Use the back camera on a phone, or the available webcam on a "
+            "computer, to take a clear picture of the apple."
+        )
         _render_camera_security_notice()
         st.html(
             '<div class="camera-guide"><span></span>'
@@ -177,7 +180,8 @@ def render_scan_input() -> SelectedImage | None:
 
     elif input_method == "live":
         st.write(
-            "Start the live camera to detect and classify apples continuously."
+            "Start the back camera on a phone, or the available webcam on a "
+            "computer, to detect and classify apples continuously."
         )
         _render_camera_security_notice()
         st.caption(
