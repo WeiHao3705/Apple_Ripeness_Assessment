@@ -11,6 +11,7 @@ import av
 import cv2
 import numpy as np
 import streamlit as st
+from aiortc import codecs as aiortc_codecs
 from aiortc.codecs import h264 as aiortc_h264
 from aiortc.codecs import vpx as aiortc_vpx
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
@@ -31,43 +32,89 @@ MAX_TRACK_DISTANCE = 180               # px: tolerate normal movement between in
 MAX_MISSED_CYCLES = 3                  # detection cycles an apple can vanish before its track is dropped
 DETECTION_MAX_DIMENSION = 576          # run watershed on a small, aspect-preserving copy
 MAX_APPLES_PER_CYCLE = 4               # cap classification work per cycle so worst-case latency stays bounded
-# Logitech C270 native HD capture mode.
+# Logitech C270 native HD capture mode (used when running locally).
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
 CAMERA_FPS = 30
 WEBRTC_DEFAULT_BITRATE = 4_000_000
 WEBRTC_MAX_BITRATE = 8_000_000
 
+# Streamlit Community Cloud runs this app in a small shared container that is
+# usually far away from the user. A 720p/30 round trip (browser -> server ->
+# OpenCV -> re-encode -> browser) that feels instant on localhost turns into
+# multi-second lag there, so fall back to a much lighter profile when deployed.
+IS_CLOUD_DEPLOYMENT = os.path.isdir("/mount/src") or bool(
+    os.getenv("STREAMLIT_CLOUD") or os.getenv("APPLE_LIVE_CAMERA_LIGHT")
+)
+
+if IS_CLOUD_DEPLOYMENT:
+    CAMERA_WIDTH = 640
+    CAMERA_HEIGHT = 360
+    CAMERA_FPS = 15
+    WEBRTC_DEFAULT_BITRATE = 800_000
+    WEBRTC_MAX_BITRATE = 1_500_000
+    PREDICTION_INTERVAL_SECONDS = 0.6   # one shared CPU: infer less often
+    DETECTION_MAX_DIMENSION = 384
+    MAX_APPLES_PER_CYCLE = 2
+
+
+def _secret(name: str) -> str:
+    """Read a setting from Streamlit secrets first, then the environment."""
+
+    try:
+        value = st.secrets[name]
+    except Exception:
+        value = os.getenv(name, "")
+    return str(value).strip()
+
+
+def _turn_servers() -> list[dict]:
+    """Return the configured TURN server, if any.
+
+    STUN alone only works when both peers can be reached directly. The
+    Streamlit Cloud container sits behind NAT, and many office/campus/home
+    networks block or symmetrically NAT the UDP media path, so on those
+    networks the connection never leaves "Connecting...". A TURN relay is the
+    only reliable fix. Provide TURN_URL, TURN_USERNAME and TURN_CREDENTIAL in
+    .streamlit/secrets.toml (or the Streamlit Cloud "Secrets" box).
+
+    TURN_URL may hold several comma-separated URLs, e.g.
+        "turn:host:3478?transport=udp,turn:host:3478?transport=tcp,turns:host:5349"
+    Including a TCP/TLS variant matters: it is what gets through firewalls
+    that drop UDP entirely.
+    """
+
+    turn_url = _secret("TURN_URL")
+    turn_username = _secret("TURN_USERNAME")
+    turn_credential = _secret("TURN_CREDENTIAL")
+    if not (turn_url and turn_username and turn_credential):
+        return []
+
+    urls = [part.strip() for part in turn_url.split(",") if part.strip()]
+    return [
+        {
+            "urls": urls,
+            "username": turn_username,
+            "credential": turn_credential,
+        }
+    ]
+
 
 def _get_rtc_configuration() -> dict:
-    """Build ICE configuration for local and deployed WebRTC connections.
+    """Build ICE configuration for local and deployed WebRTC connections."""
 
-    Public STUN servers are sufficient on most networks. Deployments behind a
-    restrictive firewall or symmetric NAT can additionally provide TURN_URL,
-    TURN_USERNAME and TURN_CREDENTIAL as environment variables.
-    """
-    ice_servers = [
+    ice_servers: list[dict] = [
         {
             "urls": [
                 "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
                 "stun:stun.cloudflare.com:3478",
             ]
         }
     ]
+    ice_servers.extend(_turn_servers())
 
-    turn_url = os.getenv("TURN_URL", "").strip()
-    turn_username = os.getenv("TURN_USERNAME", "").strip()
-    turn_credential = os.getenv("TURN_CREDENTIAL", "").strip()
-    if turn_url and turn_username and turn_credential:
-        ice_servers.append(
-            {
-                "urls": turn_url,
-                "username": turn_username,
-                "credential": turn_credential,
-            }
-        )
-
-    return {"iceServers": ice_servers}
+    return {"iceServers": ice_servers, "iceCandidatePoolSize": 4}
 
 
 # aiortc defaults VP8 to 0.5 Mbps and caps it at 1.5 Mbps, which is too low
@@ -77,6 +124,58 @@ aiortc_vpx.DEFAULT_BITRATE = WEBRTC_DEFAULT_BITRATE
 aiortc_vpx.MAX_BITRATE = WEBRTC_MAX_BITRATE
 aiortc_h264.DEFAULT_BITRATE = WEBRTC_DEFAULT_BITRATE
 aiortc_h264.MAX_BITRATE = WEBRTC_MAX_BITRATE
+
+
+def _force_vp8_only() -> None:
+    """Drop H.264 from the server's advertised video codecs.
+
+    Desktop Chrome offers and prefers H.264; mobile Chrome typically settles on
+    VP8. When the server-side H.264 path is unavailable or broken in a given
+    deployment, negotiation fails for desktop only — the browser sends its
+    offer and never receives an answer, so the preview hangs at "Connecting"
+    while phones keep working against the very same server.
+
+    VP8 is mandatory-to-implement in WebRTC and supported by every browser, so
+    restricting to it costs nothing here (frames are software-encoded either
+    way) and makes negotiation identical across devices.
+
+    Set APPLE_LIVE_CAMERA_ALLOW_H264=1 to restore the default codec list.
+    """
+
+    if os.getenv("APPLE_LIVE_CAMERA_ALLOW_H264"):
+        return
+
+    try:
+        video = aiortc_codecs.CODECS.get("video")
+        if not video:
+            return
+
+        kept_payload_types = {
+            codec.payloadType
+            for codec in video
+            if codec.mimeType.lower() not in ("video/h264", "video/rtx")
+        }
+
+        filtered = []
+        for codec in video:
+            mime = codec.mimeType.lower()
+            if mime == "video/h264":
+                continue
+            # Retransmission entries point at a codec via their "apt"
+            # parameter; drop the ones left dangling by the removal above.
+            if mime == "video/rtx" and codec.parameters.get("apt") not in kept_payload_types:
+                continue
+            filtered.append(codec)
+
+        # Never leave the server with no way to send video.
+        if any(codec.mimeType.lower() == "video/vp8" for codec in filtered):
+            video[:] = filtered
+    except Exception:
+        # A codec-registry change in a future aiortc must not break the app.
+        pass
+
+
+_force_vp8_only()
 
 
 @dataclass
@@ -103,12 +202,13 @@ class _Track:
         self.missed = 0
 
 
-def _normalize_to_720p(img: np.ndarray) -> np.ndarray:
-    """Return a 16:9 frame with a fixed 1280 x 720 output resolution.
+def _normalize_frame(img: np.ndarray) -> np.ndarray:
+    """Return a 16:9 frame at the configured processing resolution.
 
     Browsers can occasionally deliver a fallback size despite the requested
     media constraints. Centre-cropping before resizing preserves the image's
-    proportions while keeping every processed and returned frame at 720p.
+    proportions while keeping every processed and returned frame identical
+    in size (720p locally, a smaller profile when deployed).
     """
 
     height, width = img.shape[:2]
@@ -457,7 +557,7 @@ class ApplePredictionProcessor:
         # Show the fixed processing/output size independently of how small the
         # browser must render the preview on the page.
         cv2.putText(
-            img, f"720p: {width} x {height}", (12, 30),
+            img, f"{width} x {height}", (12, 30),
             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA,
         )
 
@@ -486,7 +586,7 @@ class ApplePredictionProcessor:
 
     def recv(self, frame: "av.VideoFrame") -> "av.VideoFrame":
         img = frame.to_ndarray(format="bgr24")
-        img = _normalize_to_720p(img)
+        img = _normalize_frame(img)
 
         now = time.monotonic()
 

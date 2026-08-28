@@ -5,7 +5,10 @@ Pillow
 joblib
 scikit-image
 scikit-learn
-streamlit-webrtc
-av
-aiortc
+# Pinned to the versions verified working locally. Leaving these
+# unpinned lets Streamlit Cloud resolve different WebRTC versions
+# than the ones tested, which can break offer/answer negotiation.
+streamlit-webrtc==0.77.0
+av==17.1.0
+aiortc==1.15.0
 supabase==2.31.0
