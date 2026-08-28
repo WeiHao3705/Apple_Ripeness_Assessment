@@ -23,31 +23,37 @@ from module.Module1.preprocessing import create_apple_candidate_mask
 # Configuration
 # ============================================================
 
-PREDICTION_INTERVAL_SECONDS = 0.5      # keep cloud CPU free for real-time video delivery
+PREDICTION_INTERVAL_SECONDS = 0.25     # responsive without processing every video frame
 CONFIDENCE_THRESHOLD = 0.55            # temporal agreement supplies an additional confidence gate
 STABILITY_WINDOW = 3                   # recent predictions used to suppress flicker
 MIN_CANDIDATE_RATIO = 0.05             # FR-LC-14: reject empty / no-apple ROI
 MAX_TRACK_DISTANCE = 180               # px: tolerate normal movement between inference cycles
 MAX_MISSED_CYCLES = 3                  # detection cycles an apple can vanish before its track is dropped
-DETECTION_MAX_DIMENSION = 448          # detect on a small, aspect-preserving copy
+DETECTION_MAX_DIMENSION = 576          # run watershed on a small, aspect-preserving copy
 MAX_APPLES_PER_CYCLE = 4               # cap classification work per cycle so worst-case latency stays bounded
-# Keep an HD live preview while the detection worker runs at a lower rate so
-# classification does not block video delivery.
+# Logitech C270 native HD capture mode.
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
 CAMERA_FPS = 30
-WEBRTC_DEFAULT_BITRATE = 800_000
-WEBRTC_MAX_BITRATE = 1_500_000
+WEBRTC_DEFAULT_BITRATE = 4_000_000
+WEBRTC_MAX_BITRATE = 8_000_000
 
 
 def _get_rtc_configuration() -> dict:
     """Build ICE configuration for local and deployed WebRTC connections.
 
-    Google's public STUN server is free and requires no credentials. An
-    optional TURN relay can still be supplied for networks where a direct
-    peer-to-peer route cannot be established.
+    Public STUN servers are sufficient on most networks. Deployments behind a
+    restrictive firewall or symmetric NAT can additionally provide TURN_URL,
+    TURN_USERNAME and TURN_CREDENTIAL as environment variables.
     """
-    ice_servers = [{"urls": "stun:stun.l.google.com:19302"}]
+    ice_servers = [
+        {
+            "urls": [
+                "stun:stun.l.google.com:19302",
+                "stun:stun.cloudflare.com:3478",
+            ]
+        }
+    ]
 
     turn_url = os.getenv("TURN_URL", "").strip()
     turn_username = os.getenv("TURN_USERNAME", "").strip()
@@ -64,8 +70,9 @@ def _get_rtc_configuration() -> dict:
     return {"iceServers": ice_servers}
 
 
-# Keep the return-path bitrate appropriate for the lightweight live preview.
-# This avoids buffering several seconds of video on slower mobile links.
+# aiortc defaults VP8 to 0.5 Mbps and caps it at 1.5 Mbps, which is too low
+# for a detailed 720p/30 preview. Raise both supported return-path encoders
+# before streamlit-webrtc creates them. This does not modify site-packages.
 aiortc_vpx.DEFAULT_BITRATE = WEBRTC_DEFAULT_BITRATE
 aiortc_vpx.MAX_BITRATE = WEBRTC_MAX_BITRATE
 aiortc_h264.DEFAULT_BITRATE = WEBRTC_DEFAULT_BITRATE
@@ -96,12 +103,12 @@ class _Track:
         self.missed = 0
 
 
-def _normalize_live_frame(img: np.ndarray) -> np.ndarray:
-    """Return a low-latency 16:9 frame at the configured output resolution.
+def _normalize_to_720p(img: np.ndarray) -> np.ndarray:
+    """Return a 16:9 frame with a fixed 1280 x 720 output resolution.
 
     Browsers can occasionally deliver a fallback size despite the requested
     media constraints. Centre-cropping before resizing preserves the image's
-    proportions while keeping encoding cost and network use predictable.
+    proportions while keeping every processed and returned frame at 720p.
     """
 
     height, width = img.shape[:2]
@@ -260,11 +267,10 @@ class ApplePredictionProcessor:
             return None
 
         try:
-            # The ROI has already been localized and colour-gated above, so
-            # use the dedicated low-latency preprocessing path. Running the
-            # full five-iteration GrabCut pipeline here needlessly competes
-            # with WebRTC encoding and makes the returned preview fall behind.
-            outcome = predict_ripeness(roi, fast=True)
+            # Use the same GrabCut preprocessing used during model training.
+            # Detection is now limited to a few stable boxes, so this accuracy
+            # improvement does not block the preview thread.
+            outcome = predict_ripeness(roi)
         except (FileNotFoundError, ValueError, OSError, RuntimeError):
             return None
 
@@ -451,7 +457,7 @@ class ApplePredictionProcessor:
         # Show the fixed processing/output size independently of how small the
         # browser must render the preview on the page.
         cv2.putText(
-            img, f"Live: {width} x {height}", (12, 30),
+            img, f"720p: {width} x {height}", (12, 30),
             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA,
         )
 
@@ -480,7 +486,7 @@ class ApplePredictionProcessor:
 
     def recv(self, frame: "av.VideoFrame") -> "av.VideoFrame":
         img = frame.to_ndarray(format="bgr24")
-        img = _normalize_live_frame(img)
+        img = _normalize_to_720p(img)
 
         now = time.monotonic()
 
@@ -549,10 +555,12 @@ def live_camera_classification() -> None:
         video_processor_factory=ApplePredictionProcessor,
         media_stream_constraints={
             "video": {
-                # Phones should open the rear camera. Keep this preference
-                # non-mandatory so PCs, which do not expose a "back" camera,
-                # can fall back to their normal webcam.
-                "facingMode": {"ideal": "environment"},
+                # Do not let the browser satisfy the request by cropping and
+                # scaling a different native camera mode.
+                # Use the Logitech C270's native HD mode. Requesting 1080p or
+                # preferring 15 FPS can make the browser select its 640 x 360
+                # compatibility mode instead.
+                "resizeMode": {"ideal": "none"},
                 "width": {"ideal": CAMERA_WIDTH},
                 "height": {"ideal": CAMERA_HEIGHT},
                 "frameRate": {"ideal": CAMERA_FPS},
@@ -572,9 +580,6 @@ def live_camera_classification() -> None:
                 "height": "auto",
             },
         },
-        # Process the newest available frame and discard stale queued frames.
-        # This keeps motion current if conversion or encoding briefly falls
-        # behind, while preserving the requested 1280x720 at 30 FPS capture.
         async_processing=True,
     )
 
@@ -588,38 +593,24 @@ def live_camera_classification() -> None:
             )
         return
 
-    # Never block the Streamlit script in a ``while ctx.state.playing`` loop.
-    # A blocking loop prevents Stop/navigation widget reruns from completing,
-    # which can leave getUserMedia holding the webcam. On the next attempt the
-    # browser then reports NotReadableError: Device in use.
-    @st.fragment(run_every=1.0)
-    def render_latest_results() -> None:
-        processor = ctx.video_processor
-        if not ctx.state.playing or processor is None:
-            return
+    result_placeholder = st.empty()
 
-        latest_results: list[ApplePrediction] | None = None
-        while True:
-            try:
-                # Drain the small queue without waiting so this fragment never
-                # delays the main script or camera lifecycle callbacks.
-                latest_results = processor.result_queue.get_nowait()
-            except queue.Empty:
-                break
+    # Loop while the stream is active; stops (and releases the camera via
+    # streamlit-webrtc) once the user stops the stream or leaves the screen.
+    while ctx.state.playing:
+        if ctx.video_processor is None:
+            break
 
-        if latest_results is None:
-            st.caption("Analyzing the live camera…")
-            return
+        try:
+            results: list[ApplePrediction] = ctx.video_processor.result_queue.get(timeout=1.0)
+        except queue.Empty:
+            continue
 
-        if not latest_results:
-            st.info("No apples detected. Point the camera at one or more apples.")
-        for pred in latest_results:
-            if pred.status == "confirmed":
-                st.success(
-                    f"Apple {pred.track_id}: **{pred.label}** — "
-                    f"{pred.confidence:.0%}"
-                )
-            else:
-                st.warning(f"Apple {pred.track_id}: {pred.message}")
-
-    render_latest_results()
+        with result_placeholder.container():
+            if not results:
+                st.info("No apples detected. Point the camera at one or more apples.")
+            for pred in results:
+                if pred.status == "confirmed":
+                    st.success(f"Apple {pred.track_id}: **{pred.label}** — {pred.confidence:.0%}")
+                else:
+                    st.warning(f"Apple {pred.track_id}: {pred.message}")
