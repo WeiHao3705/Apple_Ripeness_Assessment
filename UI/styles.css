@@ -789,6 +789,23 @@ hr, [data-testid="stDivider"] hr {
     animation: camera-scan 3.2s ease-in-out infinite;
 }
 
+/* Live camera stage — the preview must stay as large as the card allows. */
+
+/* No height cap and no object-fit: both would letterbox a portrait phone
+   stream inside a wide element instead of simply making the element taller. */
+.st-key-live-camera-stage video {
+    display: block;
+    width: 100% !important;
+    height: auto !important;
+    border-radius: 18px;
+    box-shadow: 0 16px 38px rgba(16, 42, 26, .22);
+}
+
+.st-key-live-camera-stage [data-testid="stVerticalBlockBorderWrapper"] {
+    background: transparent;
+    box-shadow: none;
+}
+
 .analysis-scanner {
     position: relative;
     overflow: hidden;
@@ -966,14 +983,21 @@ hr, [data-testid="stDivider"] hr {
     .hero-visual { display: none; }
     .hero-features { gap: 8px 14px; }
 
+    /* Tighter side padding on phones so the camera preview and result images
+       get as much of the 375px-class viewport as possible. */
     .st-key-scan-workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-        padding: 20px 18px;
+        padding: 20px 12px;
         border-radius: 20px;
     }
 
     .st-key-scan-workspace > div > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]::before {
-        left: 18px;
-        right: 18px;
+        left: 12px;
+        right: 12px;
+    }
+
+    [data-testid="stAppViewBlockContainer"] {
+        padding-left: .8rem;
+        padding-right: .8rem;
     }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -996,6 +1020,10 @@ hr, [data-testid="stDivider"] hr {
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+
+    /* Give the live preview the full card width and more vertical room —
+       a phone holds the apple in portrait, so height is the scarce axis. */
+    .st-key-live-camera-stage video { border-radius: 14px; }
 
     .result-summary { grid-template-columns: 1fr 1fr; }
     .result-stat--primary { grid-column: 1 / -1; grid-row: 1; }

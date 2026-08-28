@@ -31,11 +31,16 @@ MAX_TRACK_DISTANCE = 180               # px: tolerate normal movement between in
 MAX_MISSED_CYCLES = 3                  # detection cycles an apple can vanish before its track is dropped
 DETECTION_MAX_DIMENSION = 576          # run watershed on a small, aspect-preserving copy
 MAX_APPLES_PER_CYCLE = 4               # cap classification work per cycle so worst-case latency stays bounded
-# Logitech C270 native HD capture mode.
+# Preferred capture mode. These are *ideal* rather than exact so a phone camera
+# — which reports portrait dimensions and often cannot deliver an exact frame
+# rate — can still negotiate its own closest mode instead of failing outright.
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
-# Native 720p frame rate for the Logitech C270.
 CAMERA_FPS = 30
+# Longest edge kept for overlay drawing and return encoding. Frames are only
+# ever shrunk to this, never enlarged and never cropped, so portrait phone
+# frames keep their full field of view.
+PROCESSING_MAX_DIMENSION = 1280
 WEBRTC_DEFAULT_BITRATE = 2_000_000
 WEBRTC_MAX_BITRATE = 4_000_000
 
@@ -104,28 +109,27 @@ class _Track:
         self.missed = 0
 
 
-def _normalize_aspect_ratio(img: np.ndarray) -> np.ndarray:
-    """Centre-crop a frame to 16:9 without enlarging it.
+def _limit_frame_size(img: np.ndarray) -> np.ndarray:
+    """Shrink an oversized frame while preserving its aspect ratio.
 
-    WebRTC may reduce the transmitted resolution to avoid congestion. Upscaling
-    such a frame adds no detail and makes the return encoder process four times
-    as many pixels, which creates avoidable latency.
+    The camera's own aspect ratio is kept intact. Cropping to a fixed landscape
+    ratio would discard most of a portrait phone frame, and upscaling a frame
+    that WebRTC already reduced to avoid congestion adds no detail while making
+    the return encoder process several times as many pixels.
     """
 
     height, width = img.shape[:2]
-    target_ratio = CAMERA_WIDTH / CAMERA_HEIGHT
-    source_ratio = width / height
+    longest_edge = max(width, height)
+    if longest_edge <= PROCESSING_MAX_DIMENSION:
+        return np.ascontiguousarray(img)
 
-    if source_ratio > target_ratio:
-        crop_width = int(round(height * target_ratio))
-        x_offset = (width - crop_width) // 2
-        img = img[:, x_offset:x_offset + crop_width]
-    elif source_ratio < target_ratio:
-        crop_height = int(round(width / target_ratio))
-        y_offset = (height - crop_height) // 2
-        img = img[y_offset:y_offset + crop_height, :]
-
-    return np.ascontiguousarray(img)
+    scale = PROCESSING_MAX_DIMENSION / longest_edge
+    resized = cv2.resize(
+        img,
+        (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+        interpolation=cv2.INTER_AREA,
+    )
+    return np.ascontiguousarray(resized)
 
 
 class ApplePredictionProcessor:
@@ -446,10 +450,19 @@ class ApplePredictionProcessor:
         img: np.ndarray,
         predictions: list[ApplePrediction],
     ) -> None:
+        # WebRTC scales the transmitted frame down on constrained links, so the
+        # overlay is sized relative to the frame instead of in fixed pixels.
+        # Otherwise the labels become unreadable on a phone-sized stream.
+        height, width = img.shape[:2]
+        font_scale = max(0.45, min(1.05, width / 1100))
+        thickness = max(2, int(round(width / 640)))
+        line_height = int(round(30 * font_scale / 0.7))
+
         if not predictions:
             cv2.putText(
-                img, "No apples detected.", (12, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2, cv2.LINE_AA,
+                img, "No apples detected.", (12, line_height),
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 165, 255),
+                thickness, cv2.LINE_AA,
             )
             return
 
@@ -457,12 +470,28 @@ class ApplePredictionProcessor:
             x, y, w, h = pred.bbox
             color = (0, 200, 0) if pred.status == "confirmed" else (0, 165, 255)
 
-            cv2.rectangle(img, (x, y), (x + w, y + h), color, 2)
+            cv2.rectangle(img, (x, y), (x + w, y + h), color, thickness)
 
             text = f"{pred.label} - {pred.confidence:.0%}" if pred.status == "confirmed" else pred.message
+            text_origin = (x, max(line_height, y - 8))
+
+            # A filled plate behind the label keeps it legible over the apple
+            # itself and over a bright background.
+            (text_width, text_height), baseline = cv2.getTextSize(
+                text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
+            )
+            plate_left = max(0, text_origin[0] - 4)
+            plate_top = max(0, text_origin[1] - text_height - 6)
+            plate_right = min(width, text_origin[0] + text_width + 4)
+            plate_bottom = min(height, text_origin[1] + baseline)
+            if plate_right > plate_left and plate_bottom > plate_top:
+                plate = img[plate_top:plate_bottom, plate_left:plate_right]
+                cv2.addWeighted(plate, 0.35, np.zeros_like(plate), 0.0, 0.0, plate)
+
             cv2.putText(
-                img, text, (x, max(20, y - 8)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA,
+                img, text, text_origin,
+                cv2.FONT_HERSHEY_SIMPLEX, font_scale, color,
+                thickness, cv2.LINE_AA,
             )
 
     # --------------------------------------------------------
@@ -471,7 +500,7 @@ class ApplePredictionProcessor:
 
     def recv(self, frame: "av.VideoFrame") -> "av.VideoFrame":
         img = frame.to_ndarray(format="bgr24")
-        img = _normalize_aspect_ratio(img)
+        img = _limit_frame_size(img)
 
         now = time.monotonic()
 
@@ -530,41 +559,52 @@ def live_camera_classification() -> None:
             use_container_width=True,
         )
 
-    ctx = webrtc_streamer(
-        key="apple-live-camera",
-        mode=WebRtcMode.SENDRECV,
-        desired_playing_state=st.session_state[playing_state_key],
-        rtc_configuration=_get_rtc_configuration(),
-        video_processor_factory=ApplePredictionProcessor,
-        media_stream_constraints={
-            "video": {
-                # Require the Logitech C270's native HD mode. Exact dimensions
-                # prevent the browser from silently choosing a lower-resolution
-                # compatibility mode and then having the server upscale it.
-                "resizeMode": {"ideal": "none"},
-                "width": {"exact": CAMERA_WIDTH},
-                "height": {"exact": CAMERA_HEIGHT},
-                "frameRate": {"exact": CAMERA_FPS},
+    # The container key gives the stylesheet a hook for framing the preview.
+    with st.container(key="live-camera-stage"):
+        ctx = webrtc_streamer(
+            key="apple-live-camera",
+            mode=WebRtcMode.SENDRECV,
+            desired_playing_state=st.session_state[playing_state_key],
+            rtc_configuration=_get_rtc_configuration(),
+            video_processor_factory=ApplePredictionProcessor,
+            media_stream_constraints={
+                "video": {
+                    # Ask for HD, but as a preference rather than a requirement.
+                    # An exact 1280x720 request is rejected outright by phone
+                    # cameras, which report portrait dimensions and rarely
+                    # honour an exact frame rate. "ideal" lets each device
+                    # settle on its closest supported mode instead of failing
+                    # to start.
+                    "resizeMode": {"ideal": "none"},
+                    "width": {"ideal": CAMERA_WIDTH},
+                    "height": {"ideal": CAMERA_HEIGHT},
+                    "frameRate": {"ideal": CAMERA_FPS, "max": CAMERA_FPS},
+                    # Prefer the rear camera on phones — it is the one pointed
+                    # at the apple. Desktop browsers ignore this hint.
+                    "facingMode": {"ideal": "environment"},
+                },
+                "audio": False,
             },
-            "audio": False,
-        },
-        # streamlit-webrtc defaults to width: 100%, which can enlarge a
-        # low-resolution stream and make it look blurrier. Keep the camera's
-        # intrinsic display size and only shrink it when the page is narrower.
-        video_html_attrs={
-            "autoPlay": True,
-            "controls": False,
-            "playsInline": True,
-            "style": {
-                "width": "auto",
-                "maxWidth": "100%",
-                "height": "auto",
+            # Fill the available width and let the height follow the stream's
+            # own aspect ratio. Sizing to the intrinsic resolution collapsed
+            # the preview to a thumbnail on phones (WebRTC downscales the
+            # transmitted frame aggressively), while capping the height turned
+            # a portrait phone frame into a letterboxed strip.
+            video_html_attrs={
+                "autoPlay": True,
+                "controls": False,
+                "playsInline": True,
+                "muted": True,
+                "style": {
+                    "width": "100%",
+                    "height": "auto",
+                    "borderRadius": "18px",
+                },
             },
-        },
-        # recv() only draws overlays and dispatches inference to its own worker;
-        # direct processing avoids an additional asynchronous frame queue.
-        async_processing=False,
-    )
+            # recv() only draws overlays and dispatches inference to its own
+            # worker; direct processing avoids an extra async frame queue.
+            async_processing=False,
+        )
 
     if not ctx.state.playing:
         if st.session_state[playing_state_key]:
