@@ -276,27 +276,6 @@ AUTH_STYLES = """
         font-size: .72rem;
     }
 
-    .st-key-destination-card {
-        max-width: 650px;
-        margin: 8vh auto 0;
-        padding: 48px;
-        text-align: center;
-        background: rgba(255,255,255,.88);
-        border: 1px solid rgba(63,92,68,.13);
-        border-radius: 30px;
-        box-shadow: 0 24px 70px rgba(43,70,49,.14);
-    }
-
-    .destination-apple {
-        font-size: 4rem;
-        filter: drop-shadow(0 13px 15px rgba(176,44,35,.18));
-        margin-bottom: 8px;
-    }
-
-    .st-key-destination-card h1 { color: var(--ink); letter-spacing: -.04em; }
-
-    .st-key-destination-card button { border-radius: 13px; min-height: 2.8rem; }
-
     @media (max-width: 780px) {
         .block-container {
             min-height: auto;
@@ -317,7 +296,6 @@ AUTH_STYLES = """
         .auth-form-copy { padding: 35px 22px 10px; }
         .st-key-login-actions { padding: 4px 22px 0; }
         .privacy-note { padding-bottom: 22px; }
-        .st-key-destination-card { margin-top: 2vh; padding: 32px 22px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -647,10 +625,6 @@ def _continue_as_guest() -> None:
     st.session_state.guest_mode = True
 
 
-def _return_to_login() -> None:
-    st.session_state.guest_mode = False
-
-
 def require_login_or_guest() -> None:
     """Block the current page until Google login or guest mode is selected."""
     _handle_oauth_callback()
@@ -750,48 +724,3 @@ def _show_login_page() -> None:
                 '<div class="privacy-note">Secure sign-in powered by Google and Supabase · '
                 "Guest activity is not saved</div>"
             )
-
-
-def _show_destination_page() -> None:
-    with st.container(key="destination-card"):
-        st.html('<div class="destination-apple">🍎</div>')
-        st.title("You’re ready to assess")
-
-        if is_logged_in():
-            st.success(f"Signed in as {current_user_name()}")
-            st.caption(
-                "Your future classification history will be securely linked "
-                "to this account."
-            )
-            st.button("Log out", use_container_width=True, on_click=logout)
-        else:
-            st.info("You’re exploring as a guest. Classification history will not be saved.")
-            st.button(
-                "Return to sign in",
-                use_container_width=True,
-                on_click=_return_to_login,
-            )
-
-        st.divider()
-        st.subheader("Classification workspace coming next")
-        st.caption("This temporary destination is ready for your classifier interface.")
-
-
-def show_auth_entry() -> None:
-    """Show login or the temporary destination page, then stop the app run.
-
-    Remove the final ``st.stop()`` when the classification interface is ready
-    to appear after authentication.
-    """
-    st.html(AUTH_STYLES)
-    _handle_oauth_callback()
-
-    if "guest_mode" not in st.session_state:
-        st.session_state.guest_mode = False
-
-    if not is_logged_in() and not st.session_state.guest_mode:
-        _show_login_page()
-        st.stop()
-
-    _show_destination_page()
-    st.stop()
