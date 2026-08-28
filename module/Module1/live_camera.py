@@ -31,13 +31,32 @@ MAX_TRACK_DISTANCE = 180               # px: tolerate normal movement between in
 MAX_MISSED_CYCLES = 3                  # detection cycles an apple can vanish before its track is dropped
 DETECTION_MAX_DIMENSION = 576          # run watershed on a small, aspect-preserving copy
 MAX_APPLES_PER_CYCLE = 4               # cap classification work per cycle so worst-case latency stays bounded
-# Logitech C270 native HD capture mode.
+
+# Local quality profile. A local machine can sustain the full browser ->
+# Python -> browser processing round trip at the camera's native HD mode.
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
-# Native 720p frame rate for the Logitech C270.
 CAMERA_FPS = 30
 WEBRTC_DEFAULT_BITRATE = 2_000_000
 WEBRTC_MAX_BITRATE = 4_000_000
+
+# Streamlit Community Cloud runs on a small shared container and the media also
+# crosses the public internet twice. The HD profile can saturate its encoder or
+# CPU, causing the preview to freeze and then resume with old buffered frames.
+# Use a bounded real-time profile there; keep HD available for local execution.
+IS_CLOUD_DEPLOYMENT = os.path.isdir("/mount/src") or bool(
+    os.getenv("STREAMLIT_CLOUD") or os.getenv("APPLE_LIVE_CAMERA_LIGHT")
+)
+
+if IS_CLOUD_DEPLOYMENT:
+    CAMERA_WIDTH = 640
+    CAMERA_HEIGHT = 360
+    CAMERA_FPS = 15
+    WEBRTC_DEFAULT_BITRATE = 800_000
+    WEBRTC_MAX_BITRATE = 1_500_000
+    PREDICTION_INTERVAL_SECONDS = 0.6
+    DETECTION_MAX_DIMENSION = 384
+    MAX_APPLES_PER_CYCLE = 2
 
 
 def _get_rtc_configuration() -> dict:
@@ -540,9 +559,8 @@ def live_camera_classification() -> None:
         video_processor_factory=ApplePredictionProcessor,
         media_stream_constraints={
             "video": {
-                # Require the Logitech C270's native HD mode. Exact dimensions
-                # prevent the browser from silently choosing a lower-resolution
-                # compatibility mode and then having the server upscale it.
+                # Require the active local or cloud profile so the encoder has
+                # a predictable workload and does not oscillate between modes.
                 "resizeMode": {"ideal": "none"},
                 "width": {"exact": CAMERA_WIDTH},
                 "height": {"exact": CAMERA_HEIGHT},
