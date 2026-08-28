@@ -23,20 +23,21 @@ from module.Module1.preprocessing import create_apple_candidate_mask
 # Configuration
 # ============================================================
 
-PREDICTION_INTERVAL_SECONDS = 0.25     # responsive without processing every video frame
+PREDICTION_INTERVAL_SECONDS = 0.5      # keep cloud CPU free for real-time video delivery
 CONFIDENCE_THRESHOLD = 0.55            # temporal agreement supplies an additional confidence gate
 STABILITY_WINDOW = 3                   # recent predictions used to suppress flicker
 MIN_CANDIDATE_RATIO = 0.05             # FR-LC-14: reject empty / no-apple ROI
 MAX_TRACK_DISTANCE = 180               # px: tolerate normal movement between inference cycles
 MAX_MISSED_CYCLES = 3                  # detection cycles an apple can vanish before its track is dropped
-DETECTION_MAX_DIMENSION = 576          # run watershed on a small, aspect-preserving copy
+DETECTION_MAX_DIMENSION = 448          # detect on a small, aspect-preserving copy
 MAX_APPLES_PER_CYCLE = 4               # cap classification work per cycle so worst-case latency stays bounded
-# Logitech C270 native HD capture mode.
+# Keep an HD live preview while the detection worker runs at a lower rate so
+# classification does not block video delivery.
 CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
 CAMERA_FPS = 30
-WEBRTC_DEFAULT_BITRATE = 4_000_000
-WEBRTC_MAX_BITRATE = 8_000_000
+WEBRTC_DEFAULT_BITRATE = 800_000
+WEBRTC_MAX_BITRATE = 1_500_000
 
 
 def _get_rtc_configuration() -> dict:
@@ -70,9 +71,8 @@ def _get_rtc_configuration() -> dict:
     return {"iceServers": ice_servers}
 
 
-# aiortc defaults VP8 to 0.5 Mbps and caps it at 1.5 Mbps, which is too low
-# for a detailed 720p/30 preview. Raise both supported return-path encoders
-# before streamlit-webrtc creates them. This does not modify site-packages.
+# Keep the return-path bitrate appropriate for the lightweight live preview.
+# This avoids buffering several seconds of video on slower mobile links.
 aiortc_vpx.DEFAULT_BITRATE = WEBRTC_DEFAULT_BITRATE
 aiortc_vpx.MAX_BITRATE = WEBRTC_MAX_BITRATE
 aiortc_h264.DEFAULT_BITRATE = WEBRTC_DEFAULT_BITRATE
@@ -103,12 +103,12 @@ class _Track:
         self.missed = 0
 
 
-def _normalize_to_720p(img: np.ndarray) -> np.ndarray:
-    """Return a 16:9 frame with a fixed 1280 x 720 output resolution.
+def _normalize_live_frame(img: np.ndarray) -> np.ndarray:
+    """Return a low-latency 16:9 frame at the configured output resolution.
 
     Browsers can occasionally deliver a fallback size despite the requested
     media constraints. Centre-cropping before resizing preserves the image's
-    proportions while keeping every processed and returned frame at 720p.
+    proportions while keeping encoding cost and network use predictable.
     """
 
     height, width = img.shape[:2]
@@ -457,7 +457,7 @@ class ApplePredictionProcessor:
         # Show the fixed processing/output size independently of how small the
         # browser must render the preview on the page.
         cv2.putText(
-            img, f"720p: {width} x {height}", (12, 30),
+            img, f"Live: {width} x {height}", (12, 30),
             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA,
         )
 
@@ -486,7 +486,7 @@ class ApplePredictionProcessor:
 
     def recv(self, frame: "av.VideoFrame") -> "av.VideoFrame":
         img = frame.to_ndarray(format="bgr24")
-        img = _normalize_to_720p(img)
+        img = _normalize_live_frame(img)
 
         now = time.monotonic()
 
@@ -578,7 +578,10 @@ def live_camera_classification() -> None:
                 "height": "auto",
             },
         },
-        async_processing=True,
+        # recv() only resizes/draws; detection already runs in its own worker.
+        # Processing frames in order prevents an async backlog from making the
+        # phone preview drift several seconds behind the real camera.
+        async_processing=False,
     )
 
     if not ctx.state.playing:

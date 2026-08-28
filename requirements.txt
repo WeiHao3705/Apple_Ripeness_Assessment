@@ -5,7 +5,10 @@ Pillow
 joblib
 scikit-image
 scikit-learn
-streamlit-webrtc
-av
-aiortc
+# Pin the WebRTC stack together. Mismatched cached versions can leave aioice
+# retry callbacks running after their UDP transport has closed.
+streamlit-webrtc==0.77.0
+aiortc==1.15.0
+aioice==0.10.2
+av==17.1.0
 supabase==2.31.0
