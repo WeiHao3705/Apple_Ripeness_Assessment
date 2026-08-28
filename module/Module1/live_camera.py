@@ -11,7 +11,6 @@ import av
 import cv2
 import numpy as np
 import streamlit as st
-from aiortc import codecs as aiortc_codecs
 from aiortc.codecs import h264 as aiortc_h264
 from aiortc.codecs import vpx as aiortc_vpx
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
@@ -37,14 +36,8 @@ CAMERA_WIDTH = 1280
 CAMERA_HEIGHT = 720
 # Native 720p frame rate for the Logitech C270.
 CAMERA_FPS = 30
-WEBRTC_DEFAULT_BITRATE = 6_000_000
-WEBRTC_MAX_BITRATE = 10_000_000
-# Chrome/WebRTC SDP bitrate parameters use kilobits per second. A meaningful
-# floor prevents its congestion controller from immediately trading 720p
-# spatial resolution for frame rate on the browser-to-server leg.
-WEBRTC_MIN_BITRATE_KBPS = 2_500
-WEBRTC_START_BITRATE_KBPS = 6_000
-WEBRTC_MAX_BITRATE_KBPS = 10_000
+WEBRTC_DEFAULT_BITRATE = 2_000_000
+WEBRTC_MAX_BITRATE = 4_000_000
 
 
 def _get_rtc_configuration() -> dict:
@@ -78,22 +71,9 @@ def _get_rtc_configuration() -> dict:
     return {"iceServers": ice_servers}
 
 
-# Put bitrate hints in the server's SDP answer. Chromium applies these values
-# to its outbound encoder, which is the browser-to-server leg that otherwise
-# arrives here as a 640 x 360 frame despite a 1280 x 720 camera track.
-for _codec in aiortc_codecs.CODECS.get("video", []):
-    if _codec.mimeType.lower() in {"video/vp8", "video/h264"}:
-        _codec.parameters.update(
-            {
-                "x-google-min-bitrate": WEBRTC_MIN_BITRATE_KBPS,
-                "x-google-start-bitrate": WEBRTC_START_BITRATE_KBPS,
-                "x-google-max-bitrate": WEBRTC_MAX_BITRATE_KBPS,
-            }
-        )
-
 # aiortc defaults VP8 to 0.5 Mbps and caps it at 1.5 Mbps, which is too low
-# for a detailed 720p preview. Raise both supported return-path encoders before
-# streamlit-webrtc creates them. This does not modify site-packages.
+# for a useful preview. Use a moderate ceiling so congestion control can keep
+# latency bounded instead of building a large network queue.
 aiortc_vpx.DEFAULT_BITRATE = WEBRTC_DEFAULT_BITRATE
 aiortc_vpx.MAX_BITRATE = WEBRTC_MAX_BITRATE
 aiortc_h264.DEFAULT_BITRATE = WEBRTC_DEFAULT_BITRATE
@@ -124,12 +104,12 @@ class _Track:
         self.missed = 0
 
 
-def _normalize_to_720p(img: np.ndarray) -> np.ndarray:
-    """Return a 16:9 frame with a fixed 1280 x 720 output resolution.
+def _normalize_aspect_ratio(img: np.ndarray) -> np.ndarray:
+    """Centre-crop a frame to 16:9 without enlarging it.
 
-    Browsers can occasionally deliver a fallback size despite the requested
-    media constraints. Centre-cropping before resizing preserves the image's
-    proportions while keeping every processed and returned frame at 720p.
+    WebRTC may reduce the transmitted resolution to avoid congestion. Upscaling
+    such a frame adds no detail and makes the return encoder process four times
+    as many pixels, which creates avoidable latency.
     """
 
     height, width = img.shape[:2]
@@ -144,13 +124,6 @@ def _normalize_to_720p(img: np.ndarray) -> np.ndarray:
         crop_height = int(round(width / target_ratio))
         y_offset = (height - crop_height) // 2
         img = img[y_offset:y_offset + crop_height, :]
-
-    if img.shape[1] != CAMERA_WIDTH or img.shape[0] != CAMERA_HEIGHT:
-        img = cv2.resize(
-            img,
-            (CAMERA_WIDTH, CAMERA_HEIGHT),
-            interpolation=cv2.INTER_AREA,
-        )
 
     return np.ascontiguousarray(img)
 
@@ -498,7 +471,7 @@ class ApplePredictionProcessor:
 
     def recv(self, frame: "av.VideoFrame") -> "av.VideoFrame":
         img = frame.to_ndarray(format="bgr24")
-        img = _normalize_to_720p(img)
+        img = _normalize_aspect_ratio(img)
 
         now = time.monotonic()
 
@@ -590,7 +563,9 @@ def live_camera_classification() -> None:
                 "height": "auto",
             },
         },
-        async_processing=True,
+        # recv() only draws overlays and dispatches inference to its own worker;
+        # direct processing avoids an additional asynchronous frame queue.
+        async_processing=False,
     )
 
     if not ctx.state.playing:

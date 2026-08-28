@@ -127,12 +127,49 @@ def render_scan_input() -> SelectedImage | None:
     with camera_tab:
         st.write("Use your device camera to take a clear picture of the apple.")
         _render_camera_security_notice()
+
+        photo_camera_state_key = "apple_photo_camera_requested"
+        if photo_camera_state_key not in st.session_state:
+            st.session_state[photo_camera_state_key] = False
+
+        def start_photo_camera() -> None:
+            st.session_state[photo_camera_state_key] = True
+
+        def stop_photo_camera() -> None:
+            st.session_state[photo_camera_state_key] = False
+
+        start_column, stop_column = st.columns(2)
+        with start_column:
+            st.button(
+                "Start camera",
+                key="apple-photo-start",
+                on_click=start_photo_camera,
+                disabled=st.session_state[photo_camera_state_key],
+                width="stretch",
+                type="primary",
+            )
+        with stop_column:
+            st.button(
+                "Stop camera",
+                key="apple-photo-stop",
+                on_click=stop_photo_camera,
+                disabled=not st.session_state[photo_camera_state_key],
+                width="stretch",
+            )
+
         st.html(
             '<div class="camera-guide"><span></span>'
             "Align one apple inside the guide</div>"
         )
-        with st.container(key="camera-scan-stage"):
-            camera_image = st.camera_input("Take an apple photo")
+        if st.session_state[photo_camera_state_key]:
+            with st.container(key="camera-scan-stage"):
+                camera_image = st.camera_input(
+                    "Take an apple photo",
+                    key="apple-photo-camera",
+                    resolution="720p",
+                )
+        else:
+            st.caption("Click **Start camera** to take an apple photo.")
 
     with upload_tab:
         st.write("Select a JPG or PNG image from your device.")
