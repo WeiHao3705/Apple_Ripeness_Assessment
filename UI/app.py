@@ -114,33 +114,36 @@ def _render_camera_security_notice() -> None:
         )
 
 
-def _content_signature(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _upload_signature(uploaded_images) -> str | None:
-    if not uploaded_images:
-        return None
-
-    digest = hashlib.sha256()
-    for uploaded_image in uploaded_images:
-        digest.update(uploaded_image.name.encode("utf-8", errors="replace"))
-        digest.update(uploaded_image.getvalue())
-    return digest.hexdigest()
+def _clear_analysis_state() -> None:
+    """Remove still-image results when the user changes input context."""
+    st.session_state["analysis_input_hash"] = None
+    st.session_state.pop("analysis_batch_results", None)
+    st.session_state.pop("analysis_batch_errors", None)
+    st.session_state.pop("analysis_saved_count", None)
+    st.session_state.pop("analysis_save_errors", None)
 
 
 def render_scan_input() -> list[SelectedImage]:
-    """Display input controls and return images from the latest-used source."""
+    """Display the selected input control and return its still images."""
     st.subheader("Choose an input method")
 
-    camera_tab, upload_tab, live_camera_tab = st.tabs(
-        ["📷 Take a photo", "🖼️ Upload an image", "🎥 Live camera"]
+    input_method = st.segmented_control(
+        "Input method",
+        options=["photo", "upload", "live"],
+        default="photo",
+        format_func={
+            "photo": "📷 Take a photo",
+            "upload": "🖼️ Upload images",
+            "live": "🎥 Live camera",
+        }.get,
+        key="scan_input_method",
+        on_change=_clear_analysis_state,
+        label_visibility="collapsed",
+        width="stretch",
     )
 
-    camera_image = None
-    uploaded_images = []
-
-    with camera_tab:
+    if input_method == "photo":
+        camera_image = None
         st.write("Use your device camera to take a clear picture of the apple.")
         _render_camera_security_notice()
 
@@ -187,7 +190,17 @@ def render_scan_input() -> list[SelectedImage]:
         else:
             st.caption("Click **Start camera** to take an apple photo.")
 
-    with upload_tab:
+        if camera_image is not None:
+            return [
+                SelectedImage(
+                    data=camera_image.getvalue(),
+                    input_method="camera",
+                    name="Camera photo",
+                )
+            ]
+        return []
+
+    if input_method == "upload":
         st.write("Select one or more JPG or PNG images from your device.")
         uploaded_images = st.file_uploader(
             "Upload apple images",
@@ -206,7 +219,17 @@ def render_scan_input() -> list[SelectedImage]:
                         width="stretch",
                     )
 
-    with live_camera_tab:
+            return [
+                SelectedImage(
+                    data=uploaded_image.getvalue(),
+                    input_method="upload",
+                    name=uploaded_image.name,
+                )
+                for uploaded_image in uploaded_images
+            ]
+        return []
+
+    if input_method == "live":
         st.write(
             "Start the live camera to detect and classify apples continuously."
         )
@@ -226,54 +249,6 @@ def render_scan_input() -> list[SelectedImage]:
             )
         else:
             live_camera_classification()
-
-    # Streamlit retains values for widgets in inactive tabs. Track which input
-    # changed most recently so an old upload cannot mask a new camera capture
-    # (and an old camera capture cannot mask a new upload batch).
-    camera_data = camera_image.getvalue() if camera_image is not None else None
-    camera_signature = (
-        _content_signature(camera_data) if camera_data is not None else None
-    )
-    upload_signature = _upload_signature(uploaded_images)
-
-    previous_camera = st.session_state.get("observed_camera_signature")
-    previous_upload = st.session_state.get("observed_upload_signature")
-    active_source = st.session_state.get("active_still_image_source")
-
-    if upload_signature != previous_upload:
-        if upload_signature is not None:
-            active_source = "upload"
-        elif active_source == "upload":
-            active_source = "camera" if camera_signature is not None else None
-
-    if camera_signature != previous_camera:
-        if camera_signature is not None:
-            active_source = "camera"
-        elif active_source == "camera":
-            active_source = "upload" if upload_signature is not None else None
-
-    st.session_state["observed_camera_signature"] = camera_signature
-    st.session_state["observed_upload_signature"] = upload_signature
-    st.session_state["active_still_image_source"] = active_source
-
-    if active_source == "camera" and camera_data is not None:
-        return [
-            SelectedImage(
-                data=camera_data,
-                input_method="camera",
-                name="Camera photo",
-            )
-        ]
-
-    if active_source == "upload" and uploaded_images:
-        return [
-            SelectedImage(
-                data=uploaded_image.getvalue(),
-                input_method="upload",
-                name=uploaded_image.name,
-            )
-            for uploaded_image in uploaded_images
-        ]
 
     return []
 
