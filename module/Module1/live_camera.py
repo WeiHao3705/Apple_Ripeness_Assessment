@@ -267,10 +267,11 @@ class ApplePredictionProcessor:
             return None
 
         try:
-            # Use the same GrabCut preprocessing used during model training.
-            # Detection is now limited to a few stable boxes, so this accuracy
-            # improvement does not block the preview thread.
-            outcome = predict_ripeness(roi)
+            # The ROI has already been localized and colour-gated above, so
+            # use the dedicated low-latency preprocessing path. Running the
+            # full five-iteration GrabCut pipeline here needlessly competes
+            # with WebRTC encoding and makes the returned preview fall behind.
+            outcome = predict_ripeness(roi, fast=True)
         except (FileNotFoundError, ValueError, OSError, RuntimeError):
             return None
 
@@ -578,10 +579,10 @@ def live_camera_classification() -> None:
                 "height": "auto",
             },
         },
-        # recv() only resizes/draws; detection already runs in its own worker.
-        # Processing frames in order prevents an async backlog from making the
-        # phone preview drift several seconds behind the real camera.
-        async_processing=False,
+        # Process the newest available frame and discard stale queued frames.
+        # This keeps motion current if conversion or encoding briefly falls
+        # behind, while preserving the requested 1280x720 at 30 FPS capture.
+        async_processing=True,
     )
 
     if not ctx.state.playing:
@@ -594,24 +595,38 @@ def live_camera_classification() -> None:
             )
         return
 
-    result_placeholder = st.empty()
+    # Never block the Streamlit script in a ``while ctx.state.playing`` loop.
+    # A blocking loop prevents Stop/navigation widget reruns from completing,
+    # which can leave getUserMedia holding the webcam. On the next attempt the
+    # browser then reports NotReadableError: Device in use.
+    @st.fragment(run_every=1.0)
+    def render_latest_results() -> None:
+        processor = ctx.video_processor
+        if not ctx.state.playing or processor is None:
+            return
 
-    # Loop while the stream is active; stops (and releases the camera via
-    # streamlit-webrtc) once the user stops the stream or leaves the screen.
-    while ctx.state.playing:
-        if ctx.video_processor is None:
-            break
+        latest_results: list[ApplePrediction] | None = None
+        while True:
+            try:
+                # Drain the small queue without waiting so this fragment never
+                # delays the main script or camera lifecycle callbacks.
+                latest_results = processor.result_queue.get_nowait()
+            except queue.Empty:
+                break
 
-        try:
-            results: list[ApplePrediction] = ctx.video_processor.result_queue.get(timeout=1.0)
-        except queue.Empty:
-            continue
+        if latest_results is None:
+            st.caption("Analyzing the live camera…")
+            return
 
-        with result_placeholder.container():
-            if not results:
-                st.info("No apples detected. Point the camera at one or more apples.")
-            for pred in results:
-                if pred.status == "confirmed":
-                    st.success(f"Apple {pred.track_id}: **{pred.label}** — {pred.confidence:.0%}")
-                else:
-                    st.warning(f"Apple {pred.track_id}: {pred.message}")
+        if not latest_results:
+            st.info("No apples detected. Point the camera at one or more apples.")
+        for pred in latest_results:
+            if pred.status == "confirmed":
+                st.success(
+                    f"Apple {pred.track_id}: **{pred.label}** — "
+                    f"{pred.confidence:.0%}"
+                )
+            else:
+                st.warning(f"Apple {pred.track_id}: {pred.message}")
+
+    render_latest_results()
