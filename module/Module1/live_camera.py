@@ -43,18 +43,11 @@ WEBRTC_MAX_BITRATE = 1_500_000
 def _get_rtc_configuration() -> dict:
     """Build ICE configuration for local and deployed WebRTC connections.
 
-    Public STUN servers are sufficient on most networks. Deployments behind a
-    restrictive firewall or symmetric NAT can additionally provide TURN_URL,
-    TURN_USERNAME and TURN_CREDENTIAL as environment variables.
+    Google's public STUN server is free and requires no credentials. An
+    optional TURN relay can still be supplied for networks where a direct
+    peer-to-peer route cannot be established.
     """
-    ice_servers = [
-        {
-            "urls": [
-                "stun:stun.l.google.com:19302",
-                "stun:stun.cloudflare.com:3478",
-            ]
-        }
-    ]
+    ice_servers = [{"urls": "stun:stun.l.google.com:19302"}]
 
     turn_url = os.getenv("TURN_URL", "").strip()
     turn_username = os.getenv("TURN_USERNAME", "").strip()
