@@ -117,14 +117,29 @@ def render_scan_input() -> SelectedImage | None:
     """Display input controls and return the selected still image."""
     st.subheader("Choose an input method")
 
-    camera_tab, upload_tab, live_camera_tab = st.tabs(
-        ["📷 Take a photo", "🖼️ Upload an image", "🎥 Live camera"]
+    def reset_inactive_live_camera() -> None:
+        if st.session_state.get("scan_input_method") != "live":
+            st.session_state["apple_live_camera_requested"] = False
+
+    input_method = st.segmented_control(
+        "Input method",
+        options=["camera", "upload", "live"],
+        default=None,
+        format_func={
+            "camera": "📷 Take a photo",
+            "upload": "🖼️ Upload an image",
+            "live": "🎥 Live camera",
+        }.get,
+        key="scan_input_method",
+        on_change=reset_inactive_live_camera,
+        width="stretch",
     )
 
-    camera_image = None
-    uploaded_image = None
+    if input_method is None:
+        st.info("Select an input method to begin. Your camera will stay off until you choose a camera option.")
+        return None
 
-    with camera_tab:
+    if input_method == "camera":
         st.write("Use your device camera to take a clear picture of the apple.")
         _render_camera_security_notice()
         st.html(
@@ -133,8 +148,13 @@ def render_scan_input() -> SelectedImage | None:
         )
         with st.container(key="camera-scan-stage"):
             camera_image = st.camera_input("Take an apple photo")
+        if camera_image is not None:
+            return SelectedImage(
+                data=camera_image.getvalue(),
+                input_method="camera",
+            )
 
-    with upload_tab:
+    elif input_method == "upload":
         st.write("Select a JPG or PNG image from your device.")
         uploaded_image = st.file_uploader(
             "Upload an apple image",
@@ -147,8 +167,12 @@ def render_scan_input() -> SelectedImage | None:
                 caption="Selected image",
                 width="stretch",
             )
+            return SelectedImage(
+                data=uploaded_image.getvalue(),
+                input_method="upload",
+            )
 
-    with live_camera_tab:
+    elif input_method == "live":
         st.write(
             "Start the live camera to detect and classify apples continuously."
         )
@@ -169,18 +193,6 @@ def render_scan_input() -> SelectedImage | None:
         else:
             live_camera_classification()
 
-    # An uploaded image takes priority if an older camera capture is also
-    # retained by Streamlit's widget state.
-    if uploaded_image is not None:
-        return SelectedImage(
-            data=uploaded_image.getvalue(),
-            input_method="upload",
-        )
-    if camera_image is not None:
-        return SelectedImage(
-            data=camera_image.getvalue(),
-            input_method="camera",
-        )
     return None
 
 
