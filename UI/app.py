@@ -108,8 +108,8 @@ def _render_camera_security_notice() -> None:
     if not _camera_context_is_secure():
         st.warning(
             "Your browser blocks camera access on this HTTP network address. "
-            "Open the app through an HTTPS URL to use the live camera. "
-            "Image upload is still available."
+            "Open the app through an HTTPS URL to use photo capture or the "
+            "live camera. Image upload is still available."
         )
 
 
@@ -123,9 +123,10 @@ def render_scan_input() -> SelectedImage | None:
 
     input_method = st.segmented_control(
         "Input method",
-        options=["upload", "live"],
+        options=["camera", "upload", "live"],
         default=None,
         format_func={
+            "camera": "📷 Take a photo",
             "upload": "🖼️ Upload an image",
             "live": "🎥 Live camera",
         }.get,
@@ -141,7 +142,22 @@ def render_scan_input() -> SelectedImage | None:
         )
         return None
 
-    if input_method == "upload":
+    if input_method == "camera":
+        st.write("Use your device camera to take a clear picture of the apple.")
+        _render_camera_security_notice()
+        st.html(
+            '<div class="camera-guide"><span></span>'
+            "Align one apple inside the guide</div>"
+        )
+        with st.container(key="camera-scan-stage"):
+            camera_image = st.camera_input("Take an apple photo")
+        if camera_image is not None:
+            return SelectedImage(
+                data=camera_image.getvalue(),
+                input_method="camera",
+            )
+
+    elif input_method == "upload":
         st.write("Select a JPG or PNG image from your device.")
         uploaded_image = st.file_uploader(
             "Upload an apple image",
@@ -166,7 +182,7 @@ def render_scan_input() -> SelectedImage | None:
         _render_camera_security_notice()
         st.caption(
             "Live-camera frames are processed in real time and are not saved "
-            "to History. Upload an image to save an assessment."
+            "to History. Capture a photo to save an assessment."
         )
         try:
             from module.Module1.live_camera import live_camera_classification
