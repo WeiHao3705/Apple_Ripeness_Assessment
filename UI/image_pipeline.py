@@ -29,6 +29,7 @@ class AppleResult:
     label: str
     confidence: float
     probabilities: dict[str, float]
+    bbox: tuple[int, int, int, int]
     classification_error: str | None = None
 
 
@@ -133,6 +134,7 @@ def analyse_image(image_bytes: bytes) -> ImageAnalysis:
                 label=label,
                 confidence=confidence,
                 probabilities=probabilities,
+                bbox=(x, y, width, height),
                 classification_error=classification_error,
             )
         )

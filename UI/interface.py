@@ -17,6 +17,7 @@ if str(UI_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(UI_DIRECTORY))
 
 from image_pipeline import ImageAnalysis, analyse_image
+from module.report import create_pdf_report
 from analysis_repository import (
     AnalysisRepositoryError,
     download_analysis_image,
@@ -37,6 +38,16 @@ class SelectedImage:
     input_method: str
     name: str
 
+def _selected_images_hash(selected_images: list[SelectedImage]) -> str:
+    """Create a stable hash for the currently selected images."""
+    hasher = hashlib.sha256()
+
+    for selected_image in selected_images:
+        hasher.update(selected_image.data)
+        hasher.update(selected_image.input_method.encode("utf-8"))
+        hasher.update(selected_image.name.encode("utf-8"))
+
+    return hasher.hexdigest()
 
 def load_app_styles() -> None:
     """Load the application stylesheet on every Streamlit rerun."""
@@ -293,7 +304,84 @@ def render_processing_stages(analysis: ImageAnalysis) -> None:
             st.warning(f"Segmentation fallback used: {reason}")
 
 
-def render_completed_analysis(analysis: ImageAnalysis) -> None:
+def _build_report_results(analysis: ImageAnalysis) -> list[dict]:
+    """Convert AppleResult objects into the plain-dict format report.py expects."""
+    return [
+        {
+            "source": "Upload / Camera Capture",
+            "apple_id": apple.apple_id,
+            "label": apple.label,
+            "confidence": apple.confidence,
+            "bbox": apple.bbox,
+            "probabilities": apple.probabilities,
+            "image": apple.crop,
+        }
+        for apple in analysis.apples
+        if not apple.classification_error
+    ]
+
+
+def render_report_section(analysis: ImageAnalysis, report_key: str = "single",) -> None:
+    """
+    Generate the assessment report immediately once classification results
+    are available, then let the user choose when to export it.
+
+    The generated PDF (and its Gemini-assisted summary) is cached in
+    session_state keyed on the same input hash used for the analysis
+    itself. Streamlit reruns this entire script on every widget
+    interaction, so WITHOUT this cache, every rerun (e.g. expanding an
+    unrelated section) would silently re-call the Gemini API and rebuild
+    the PDF from scratch - the cache makes report generation happen once
+    per actual new analysis, not once per rerun.
+    """
+    if not analysis.apples:
+        return
+
+    current_hash = st.session_state.get("analysis_input_hash")
+
+    needs_generation = (
+        "analysis_report_pdf" not in st.session_state
+        or st.session_state.get("analysis_report_hash") != current_hash
+    )
+
+    if needs_generation:
+        results = _build_report_results(analysis)
+        with st.spinner("Preparing your assessment report…"):
+            pdf_bytes, summary, ai_error = create_pdf_report(
+                mode="single",
+                results=results,
+                metadata={"Detection message": analysis.detection_message},
+                include_images=True,
+            )
+        st.session_state["analysis_report_pdf"] = pdf_bytes
+        st.session_state["analysis_report_summary"] = summary
+        st.session_state["analysis_report_ai_error"] = ai_error
+        st.session_state["analysis_report_hash"] = current_hash
+
+    pdf_bytes = st.session_state["analysis_report_pdf"]
+    summary = st.session_state["analysis_report_summary"]
+    ai_error = st.session_state.get("analysis_report_ai_error")
+
+    st.divider()
+    st.subheader("Assessment report")
+    st.caption(
+        f"{summary['total']} apple(s) classified · "
+        f"mean confidence {summary['confidence']['mean']:.1%}"
+    )
+    if ai_error:
+        st.caption(f"Note: {ai_error}")
+
+    st.download_button(
+        "📄 Export PDF report",
+        data=pdf_bytes,
+        file_name=f"apple_ripeness_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+        mime="application/pdf",
+        width="stretch",
+        key=f"export_pdf_button_{report_key}",
+    )
+
+
+def render_completed_analysis(analysis: ImageAnalysis, report_key: str = "single",) -> None:
     """Display detection and classification results."""
     if not analysis.apples:
         st.warning(analysis.detection_message or "No apple was detected.")
@@ -369,18 +457,7 @@ def render_completed_analysis(analysis: ImageAnalysis) -> None:
                             st.write(f"{label}: {probability:.1%}")
 
     render_processing_stages(analysis)
-
-
-def _selected_images_hash(selected_images: list[SelectedImage]) -> str | None:
-    if not selected_images:
-        return None
-
-    digest = hashlib.sha256()
-    for selected_image in selected_images:
-        digest.update(selected_image.input_method.encode("utf-8"))
-        digest.update(selected_image.name.encode("utf-8", errors="replace"))
-        digest.update(selected_image.data)
-    return digest.hexdigest()
+    render_report_section(analysis, report_key=report_key)
 
 
 def render_result_panel(selected_images: list[SelectedImage]) -> None:
@@ -493,7 +570,7 @@ def render_result_panel(selected_images: list[SelectedImage]) -> None:
             if analysis_error:
                 st.error(analysis_error)
             elif analysis is not None:
-                render_completed_analysis(analysis)
+                render_completed_analysis(analysis, report_key=f"image_{index}")
 
 
 def _format_history_time(value: str) -> str:

@@ -9,3 +9,5 @@ streamlit-webrtc
 av
 aiortc
 supabase==2.31.0
+fpdf2
+requests
