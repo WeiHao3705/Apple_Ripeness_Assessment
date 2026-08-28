@@ -641,7 +641,3 @@ def main() -> None:
         "camera analysis, Supabase authentication, and private history storage "
         "are connected."
     )
-
-
-if __name__ == "__main__":
-    main()
