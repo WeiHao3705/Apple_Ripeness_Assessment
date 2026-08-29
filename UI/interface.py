@@ -216,6 +216,7 @@ def render_scan_input() -> list[SelectedImage]:
             "Drop apple images",
             type=["jpg", "jpeg", "png"],
             accept_multiple_files=True,
+            max_upload_size=10,
             key="apple_images",
         )
         if uploaded_images:

@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import tempfile
 import unicodedata
 from collections import Counter
 from datetime import datetime
@@ -349,7 +350,9 @@ class _ReportPDF(FPDF):
     def header(self):
         self.set_x(self.l_margin)
         self.set_font("Helvetica", "B", 16)
-        self.cell(0, 9, _ascii(self.title_text), new_x="LMARGIN", new_y="NEXT")
+        # ``ln=1`` works with both legacy PyFPDF 1.7.x and fpdf2.  The
+        # ``new_x``/``new_y`` replacement is only available in fpdf2.
+        self.cell(0, 9, _ascii(self.title_text), ln=1)
         self.set_draw_color(180, 180, 180)
         self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
         self.ln(4)
@@ -377,7 +380,7 @@ def _add_section(pdf: FPDF, title: str) -> None:
         pdf.add_page()
     pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, _ascii(title), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, _ascii(title), ln=1)
     pdf.ln(1)
 
 
@@ -386,7 +389,7 @@ def _add_subsection(pdf: FPDF, title: str, body: str) -> None:
         pdf.add_page()
     pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 6, _ascii(title), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, _ascii(title), ln=1)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_x(pdf.l_margin)
     available_width = max(20, pdf.w - pdf.r_margin - pdf.get_x())
@@ -409,7 +412,7 @@ def _add_distribution(pdf: FPDF, counts: dict[str, int], total: int) -> None:
         pdf.set_fill_color(90, 140, 190)
         pdf.rect(x, pdf.get_y() + 1.2, fill_width, 3.4, style="F")
         pdf.cell(bar_width, 6, "")
-        pdf.cell(0, 6, f"{count} ({pct:.1%})", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 6, f"{count} ({pct:.1%})", ln=1)
 
 
 def _crop_stream(image: np.ndarray) -> io.BytesIO | None:
@@ -450,9 +453,9 @@ def create_pdf_report(
 
     pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, _ascii(subtitle), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, _ascii(subtitle), ln=1)
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 6, datetime.now().strftime("Generated: %Y-%m-%d %H:%M:%S"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, datetime.now().strftime("Generated: %Y-%m-%d %H:%M:%S"), ln=1)
     pdf.ln(3)
 
     _add_key_value(pdf, "Mode", mode)
@@ -523,10 +526,23 @@ def create_pdf_report(
                 f"{result.get('source', 'Image')} - Apple #{result.get('apple_id', '-')} - "
                 f"{result.get('label', 'Unknown')} ({_safe_float(result.get('confidence')):.1%})"
             )
-            pdf.cell(0, 6, _ascii(title_line), new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 6, _ascii(title_line), ln=1)
             image_y = pdf.get_y()
+            temporary_image_path = None
             try:
-                pdf.image(stream, x=x, y=image_y, w=58, h=58, keep_aspect_ratio=True)
+                try:
+                    # fpdf2 accepts an in-memory image and this option.
+                    pdf.image(stream, x=x, y=image_y, w=58, h=58, keep_aspect_ratio=True)
+                except (TypeError, AttributeError):
+                    # PyFPDF 1.7.x requires a filesystem path. Supplying only
+                    # the width preserves the original image aspect ratio.
+                    stream.seek(0)
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".jpg", delete=False
+                    ) as temporary_image:
+                        temporary_image.write(stream.read())
+                        temporary_image_path = temporary_image.name
+                    pdf.image(temporary_image_path, x=x, y=image_y, w=58)
                 pdf.set_xy(x + 64, image_y + 2)
                 pdf.set_font("Helvetica", "", 8.5)
                 probability_lines = [
@@ -536,8 +552,16 @@ def create_pdf_report(
                 pdf.multi_cell(available_width, 5, "\n".join(probability_lines) if probability_lines else "No class probability details.")
             except Exception:
                 pass
+            finally:
+                if temporary_image_path:
+                    try:
+                        os.unlink(temporary_image_path)
+                    except OSError:
+                        pass
             pdf.set_xy(x, max(pdf.get_y(), image_y + 60))
             pdf.ln(3)
 
-    output = bytes(pdf.output(dest="S"))
+    raw_output = pdf.output(dest="S")
+    # PyFPDF returns a Latin-1 ``str`` whereas fpdf2 returns bytes-like data.
+    output = raw_output.encode("latin-1") if isinstance(raw_output, str) else bytes(raw_output)
     return output, summary, ai_error
