@@ -221,14 +221,15 @@ def render_scan_input() -> list[SelectedImage]:
         )
         if uploaded_images:
             st.caption(f"{len(uploaded_images)} image(s) selected")
-            preview_columns = st.columns(min(len(uploaded_images), 3))
-            for index, uploaded_image in enumerate(uploaded_images):
-                with preview_columns[index % len(preview_columns)]:
-                    st.image(
-                        uploaded_image,
-                        caption=uploaded_image.name,
-                        width="stretch",
-                    )
+            with st.container(key="uploaded-image-previews"):
+                preview_columns = st.columns(min(len(uploaded_images), 3))
+                for index, uploaded_image in enumerate(uploaded_images):
+                    with preview_columns[index % len(preview_columns)]:
+                        st.image(
+                            uploaded_image,
+                            caption=uploaded_image.name,
+                            width="stretch",
+                        )
 
             return [
                 SelectedImage(
@@ -268,41 +269,112 @@ def render_processing_stages(analysis: ImageAnalysis) -> None:
     """Show Module 1 preprocessing output for inspection."""
     steps = analysis.preprocessing
 
-    with st.expander("View preprocessing stages"):
+    with st.expander("View preprocessing stages", expanded=True):
+        foreground_percent = steps.foreground_ratio * 100
+
+        st.html(
+            '<div class="preprocess-intro">'
+            '<div><span>7 stages</span><strong>Image preprocessing flow</strong></div>'
+            '<p>Follow the image from the original input through enhancement, '
+            'mask creation and final background removal.</p>'
+            '</div>'
+        )
+
+        if steps.segmentation_success:
+            st.success(
+                "Segmentation succeeded · "
+                f"{foreground_percent:.1f}% of the resized image was retained as foreground."
+            )
+        else:
+            reason = steps.fallback_reason or "No reliable foreground was found."
+            st.warning(f"Segmentation fallback used: {reason}")
+
         stages = [
-            ("Original", steps.original, "BGR"),
-            ("Resized", steps.resized, "BGR"),
-            ("CLAHE", steps.clahe, "BGR"),
-            ("HSV candidate mask", steps.hsv_candidate_mask, None),
-            ("GrabCut mask", steps.grabcut_mask, None),
-            ("Refined mask", steps.refined_mask, None),
-            ("Processed output", analysis.processed, "BGR"),
+            (
+                "Original input",
+                "The decoded camera or uploaded image before any transformation.",
+                steps.original,
+                "BGR",
+                f"{steps.original.shape[1]} × {steps.original.shape[0]} px",
+            ),
+            (
+                "Resize and pad",
+                "Fits the complete image inside a 224 × 224 white canvas without stretching it.",
+                steps.resized,
+                "BGR",
+                f"{steps.resized.shape[1]} × {steps.resized.shape[0]} px",
+            ),
+            (
+                "CLAHE enhancement",
+                "Improves local brightness and contrast so apple colour and surface detail are clearer.",
+                steps.clahe,
+                "BGR",
+                "LAB lightness · clip 2.0 · grid 8 × 8",
+            ),
+            (
+                "HSV colour candidate",
+                "White pixels match the configured red, green or yellow apple colour ranges.",
+                steps.hsv_candidate_mask,
+                None,
+                _mask_coverage_label(steps.hsv_candidate_mask),
+            ),
+            (
+                "GrabCut foreground",
+                "White pixels are the foreground selected by HSV-guided GrabCut after 5 iterations.",
+                steps.grabcut_mask,
+                None,
+                _mask_coverage_label(steps.grabcut_mask),
+            ),
+            (
+                "Refined foreground mask",
+                "Opening removes isolated noise; closing fills small gaps in the detected apple.",
+                steps.refined_mask,
+                None,
+                _mask_coverage_label(steps.refined_mask),
+            ),
+            (
+                "Final processed output",
+                "The refined foreground is preserved and the removed background is displayed in white.",
+                analysis.processed,
+                "BGR",
+                (
+                    f"{foreground_percent:.1f}% foreground retained"
+                    if steps.segmentation_success
+                    else "Original enhanced image retained as fallback"
+                ),
+            ),
         ]
 
-        for row_start in range(0, len(stages), 2):
-            columns = st.columns(2)
-            for column, (caption, image, channels) in zip(
-                columns,
-                stages[row_start:row_start + 2],
+        for index, (title, description, image, channels, detail) in enumerate(
+            stages,
+            start=1,
+        ):
+            with st.container(
+                border=True,
+                key=f"preprocess-stage-{index}",
             ):
+                st.html(
+                    '<div class="preprocess-stage-heading">'
+                    f'<span>{index:02d}</span>'
+                    f'<div><strong>{title}</strong><p>{description}</p></div>'
+                    '</div>'
+                    f'<div class="preprocess-stage-detail">{detail}</div>'
+                )
                 options = {
-                    "caption": caption,
                     "width": "stretch",
                 }
                 if channels is None:
                     options["clamp"] = True
                 else:
                     options["channels"] = channels
-                column.image(image, **options)
+                st.image(image, **options)
 
-        foreground_percent = steps.foreground_ratio * 100
-        if steps.segmentation_success:
-            st.success(
-                f"Background segmentation succeeded ({foreground_percent:.1f}% foreground)."
-            )
-        else:
-            reason = steps.fallback_reason or "No reliable foreground was found."
-            st.warning(f"Segmentation fallback used: {reason}")
+
+def _mask_coverage_label(mask) -> str:
+    """Return a readable foreground-pixel summary for a binary stage mask."""
+    foreground_pixels = cv2.countNonZero(mask)
+    coverage = foreground_pixels / mask.size * 100 if mask.size else 0.0
+    return f"{coverage:.1f}% white foreground · {foreground_pixels:,} pixels"
 
 
 def _build_report_results(analysis: ImageAnalysis) -> list[dict]:
@@ -392,7 +464,6 @@ def render_completed_analysis(analysis: ImageAnalysis, report_key: str = "single
             caption="Detection result",
             width="stretch",
         )
-        render_processing_stages(analysis)
         return
 
     first_apple = analysis.apples[0]
@@ -457,11 +528,10 @@ def render_completed_analysis(analysis: ImageAnalysis, report_key: str = "single
                         ):
                             st.write(f"{label}: {probability:.1%}")
 
-    render_processing_stages(analysis)
     render_report_section(analysis, report_key=report_key)
 
 
-def render_result_panel(selected_images: list[SelectedImage]) -> None:
+def render_result_panel(selected_images: list[SelectedImage], preprocessing_slot) -> None:
     """Run the pipeline on demand for one image or a complete upload batch."""
     st.subheader("Result")
 
@@ -572,6 +642,27 @@ def render_result_panel(selected_images: list[SelectedImage]) -> None:
                 st.error(analysis_error)
             elif analysis is not None:
                 render_completed_analysis(analysis, report_key=f"image_{index}")
+
+        preprocessing_results = [
+            (index, selected_images[index], analysis)
+            for index, analysis in enumerate(completed_results)
+            if analysis is not None and index < len(selected_images)
+        ]
+
+        if preprocessing_results:
+            with preprocessing_slot.container():
+                with st.container(key="preprocessing-panel"):
+                    st.subheader("Preprocessing")
+                    for position, (index, selected_image, analysis) in enumerate(
+                        preprocessing_results
+                    ):
+                        if position:
+                            st.divider()
+                        if len(selected_images) > 1:
+                            st.markdown(
+                                f"**Image {index + 1}: {selected_image.name}**"
+                            )
+                        render_processing_stages(analysis)
 
 
 def _format_history_time(value: str) -> str:
@@ -720,7 +811,10 @@ def main() -> None:
         input_column, result_column = st.columns([1.42, 1], gap="large")
 
         with input_column:
-            selected_images = render_scan_input()
+            with st.container(key="input-panel"):
+                selected_images = render_scan_input()
+            preprocessing_slot = st.empty()
 
         with result_column:
-            render_result_panel(selected_images)
+            with st.container(key="result-panel"):
+                render_result_panel(selected_images, preprocessing_slot)
