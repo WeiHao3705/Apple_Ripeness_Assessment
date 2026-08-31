@@ -24,7 +24,7 @@ def _validate_bgr(image: np.ndarray) -> None:
             "Expected a BGR image with three channels."
         )
 
-# Step 1 - Image Resizin
+# Step 1 - Image Resizing
 def resize_image(
     image: np.ndarray,
     target_size: tuple[int, int] = (224, 224),

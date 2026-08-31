@@ -531,6 +531,34 @@ def render_completed_analysis(analysis: ImageAnalysis, report_key: str = "single
     render_report_section(analysis, report_key=report_key)
 
 
+def render_preprocessing_results(
+    selected_images: list[SelectedImage],
+    completed_results: list[ImageAnalysis | None],
+    preprocessing_slot,
+) -> None:
+    """Render preprocessing before report generation can block the script."""
+    preprocessing_results = [
+        (index, selected_images[index], analysis)
+        for index, analysis in enumerate(completed_results)
+        if analysis is not None and index < len(selected_images)
+    ]
+
+    if not preprocessing_results:
+        return
+
+    with preprocessing_slot.container():
+        with st.container(key="preprocessing-panel"):
+            st.subheader("Preprocessing")
+            for position, (index, selected_image, analysis) in enumerate(
+                preprocessing_results
+            ):
+                if position:
+                    st.divider()
+                if len(selected_images) > 1:
+                    st.markdown(f"**Image {index + 1}: {selected_image.name}**")
+                render_processing_stages(analysis)
+
+
 def render_result_panel(selected_images: list[SelectedImage], preprocessing_slot) -> None:
     """Run the pipeline on demand for one image or a complete upload batch."""
     st.subheader("Result")
@@ -626,6 +654,15 @@ def render_result_panel(selected_images: list[SelectedImage], preprocessing_slot
         completed_results = st.session_state.get("analysis_batch_results", [])
         analysis_errors = st.session_state.get("analysis_batch_errors", [])
 
+        # Populate the earlier placeholder first. Report creation may include a
+        # slow external summary call, so it must not sit in front of the visual
+        # preprocessing output in Streamlit's synchronous execution order.
+        render_preprocessing_results(
+            selected_images,
+            completed_results,
+            preprocessing_slot,
+        )
+
         for index, selected_image in enumerate(selected_images):
             analysis = (
                 completed_results[index] if index < len(completed_results) else None
@@ -642,27 +679,6 @@ def render_result_panel(selected_images: list[SelectedImage], preprocessing_slot
                 st.error(analysis_error)
             elif analysis is not None:
                 render_completed_analysis(analysis, report_key=f"image_{index}")
-
-        preprocessing_results = [
-            (index, selected_images[index], analysis)
-            for index, analysis in enumerate(completed_results)
-            if analysis is not None and index < len(selected_images)
-        ]
-
-        if preprocessing_results:
-            with preprocessing_slot.container():
-                with st.container(key="preprocessing-panel"):
-                    st.subheader("Preprocessing")
-                    for position, (index, selected_image, analysis) in enumerate(
-                        preprocessing_results
-                    ):
-                        if position:
-                            st.divider()
-                        if len(selected_images) > 1:
-                            st.markdown(
-                                f"**Image {index + 1}: {selected_image.name}**"
-                            )
-                        render_processing_stages(analysis)
 
 
 def _format_history_time(value: str) -> str:
