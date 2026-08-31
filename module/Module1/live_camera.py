@@ -1,22 +1,22 @@
-from __future__ import annotations
+from __future__ import annotations  # Defer type-hint evaluation for modern annotations.
 
-import queue
-import os
-import threading
-import time
-from collections import Counter, deque
-from dataclasses import dataclass
+import queue  # Transfers prediction results safely from worker thread to Streamlit.
+import os  # Reads optional TURN server settings from environment variables.
+import threading  # Runs model inference without blocking the camera preview.
+import time  # Supplies a monotonic clock for inference scheduling.
+from collections import Counter, deque  # Votes on labels and stores short histories.
+from dataclasses import dataclass  # Generates the prediction record's boilerplate.
 
-import av
-import cv2
-import numpy as np
-import streamlit as st
-from aiortc.codecs import h264 as aiortc_h264
-from aiortc.codecs import vpx as aiortc_vpx
-from streamlit_webrtc import WebRtcMode, webrtc_streamer
+import av  # Converts between WebRTC video frames and NumPy image arrays.
+import cv2  # OpenCV detects regions and draws the live visual overlay.
+import numpy as np  # Stores and slices camera frames as image arrays.
+import streamlit as st  # Builds the camera controls and prediction messages.
+from aiortc.codecs import h264 as aiortc_h264  # Configures H.264 video bitrate.
+from aiortc.codecs import vpx as aiortc_vpx  # Configures VP8/VP9 video bitrate.
+from streamlit_webrtc import WebRtcMode, webrtc_streamer  # Runs browser WebRTC video.
 
-from module.classification import predict_ripeness
-from module.Module1.preprocessing import create_apple_candidate_mask
+from module.classification import predict_ripeness  # Calls the trained ripeness model.
+from module.Module1.preprocessing import create_apple_candidate_mask  # Finds apple colours.
 
 
 # ============================================================
@@ -103,6 +103,8 @@ class _Track:
     __slots__ = ("id", "bbox", "recent", "missed")
 
     def __init__(self, track_id: int, bbox: tuple[int, int, int, int]) -> None:
+        """Initialize the identity, position, prediction history, and miss count."""
+
         self.id = track_id
         self.bbox = bbox
         self.recent: deque[tuple[str, float] | None] = deque(maxlen=STABILITY_WINDOW)
@@ -143,6 +145,8 @@ class ApplePredictionProcessor:
     """
 
     def __init__(self) -> None:
+        """Initialize inference timing, tracking state, and result delivery."""
+
         self._busy = False
         self._last_predict_time = 0.0
         self._state_lock = threading.Lock()
@@ -155,6 +159,8 @@ class ApplePredictionProcessor:
     # --------------------------------------------------------
 
     def _detect_apple_boxes(self, frame: np.ndarray) -> list[tuple[int, int, int, int]]:
+        """Detect apple-like colour regions and return padded bounding boxes."""
+
         if frame is None or frame.size == 0:
             return []
 
@@ -248,6 +254,8 @@ class ApplePredictionProcessor:
     # --------------------------------------------------------
 
     def _classify_roi(self, roi: np.ndarray) -> tuple[str, float] | None:
+        """Classify one apple region, or return ``None`` when it is unreliable."""
+
         if roi is None or roi.size == 0:
             return None
 
@@ -279,6 +287,8 @@ class ApplePredictionProcessor:
     # --------------------------------------------------------
 
     def _run_detection(self, frame: np.ndarray) -> None:
+        """Detect and classify apples in a worker, then publish latest results."""
+
         try:
             try:
                 boxes = self._detect_apple_boxes(frame)
@@ -316,6 +326,8 @@ class ApplePredictionProcessor:
     def _match_track(
         self, box: tuple[int, int, int, int], candidate_ids: set[int]
     ) -> int | None:
+        """Match a detected box to the nearest overlapping or nearby track."""
+
         bx, by, bw, bh = box
         cx, cy = bx + bw / 2, by + bh / 2
 
@@ -342,6 +354,8 @@ class ApplePredictionProcessor:
     def _update_tracks(
         self, boxes: list[tuple[int, int, int, int]], frame: np.ndarray
     ) -> list[ApplePrediction]:
+        """Update track identities and prediction histories for new detections."""
+
         if len(boxes) > MAX_APPLES_PER_CYCLE:
             boxes = sorted(boxes, key=lambda b: b[2] * b[3], reverse=True)[:MAX_APPLES_PER_CYCLE]
 
@@ -412,6 +426,8 @@ class ApplePredictionProcessor:
     # --------------------------------------------------------
 
     def _track_prediction(self, track: _Track) -> ApplePrediction:
+        """Convert a track's recent results into one stable display prediction."""
+
         valid = [item for item in track.recent if item is not None]
 
         if len(valid) < 2:
@@ -450,6 +466,8 @@ class ApplePredictionProcessor:
         img: np.ndarray,
         predictions: list[ApplePrediction],
     ) -> None:
+        """Draw bounding boxes and prediction labels on a camera frame."""
+
         # WebRTC scales the transmitted frame down on constrained links, so the
         # overlay is sized relative to the frame instead of in fixed pixels.
         # Otherwise the labels become unreadable on a phone-sized stream.
@@ -499,6 +517,8 @@ class ApplePredictionProcessor:
     # --------------------------------------------------------
 
     def recv(self, frame: "av.VideoFrame") -> "av.VideoFrame":
+        """Process one WebRTC frame without blocking on model inference."""
+
         img = frame.to_ndarray(format="bgr24")
         img = _limit_frame_size(img)
 
@@ -535,9 +555,13 @@ def live_camera_classification() -> None:
         st.session_state[playing_state_key] = False
 
     def start_camera() -> None:
+        """Record that the user requested the live camera to start."""
+
         st.session_state[playing_state_key] = True
 
     def stop_camera() -> None:
+        """Record that the user requested the live camera to stop."""
+
         st.session_state[playing_state_key] = False
 
     start_column, stop_column = st.columns(2)

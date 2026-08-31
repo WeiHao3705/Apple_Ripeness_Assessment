@@ -1,8 +1,8 @@
-from __future__ import annotations
+from __future__ import annotations  # Defer type-hint evaluation for modern annotations.
 
-from dataclasses import dataclass
+from dataclasses import dataclass  # Generates the result container's boilerplate methods.
 
-import numpy as np
+import numpy as np  # Supplies the ndarray type used for every stored image and mask.
 
 
 @dataclass

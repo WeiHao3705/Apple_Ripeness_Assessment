@@ -1,10 +1,10 @@
-from __future__ import annotations
+from __future__ import annotations  # Defer type-hint evaluation for modern annotations.
 
-import cv2
-import numpy as np
+import cv2  # OpenCV supplies colour conversion, resizing, masks, and GrabCut.
+import numpy as np  # NumPy stores images as arrays and creates/manipulates masks.
 
-from .config import PreprocessingConfig
-from .model import PreprocessingResult
+from .config import PreprocessingConfig  # Central settings for the pipeline.
+from .model import PreprocessingResult  # Structured container for every output step.
 
 
 # ============================================================
@@ -29,6 +29,7 @@ def resize_image(
     image: np.ndarray,
     target_size: tuple[int, int] = (224, 224),
 ) -> np.ndarray:
+    """Resize an image to fit a centered, white target-size canvas."""
 
     _validate_bgr(image)
 
@@ -56,6 +57,7 @@ def resize_image(
     else:
         interpolation = cv2.INTER_LINEAR
 
+    # OpenCV performs the actual resampling using the interpolation selected above.
     resized = cv2.resize(
         image,
         (resized_width, resized_height),
@@ -63,6 +65,7 @@ def resize_image(
     )
 
     # Create 224 x 224 white canvas
+    # NumPy creates a three-channel array filled with 255 (white).
     canvas = np.full(
         (
             target_height,
@@ -95,18 +98,23 @@ def apply_clahe(
     clip_limit: float = 2.0,
     grid_size: tuple[int, int] = (8, 8),
 ) -> np.ndarray:
+    """Improve local contrast by applying CLAHE to the LAB lightness channel."""
 
     _validate_bgr(image)
 
+    # LAB separates brightness from colour, allowing contrast enhancement without
+    # directly changing the apple's red, green, or yellow colour information.
     lab = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2LAB,
     )
 
+    # OpenCV separates the LAB image so CLAHE affects only the lightness channel.
     lightness, channel_a, channel_b = cv2.split(
         lab
     )
 
+    # CLAHE enhances small image regions while limiting amplified sensor noise.
     clahe = cv2.createCLAHE(
         clipLimit=clip_limit,
         tileGridSize=grid_size,
@@ -116,6 +124,7 @@ def apply_clahe(
         lightness
     )
 
+    # Recombine the enhanced lightness with the untouched colour channels.
     enhanced_lab = cv2.merge(
         (
             enhanced_lightness,
@@ -145,11 +154,13 @@ def apply_opening(
             "Opening expects a single-channel binary mask."
         )
 
+    # An elliptical OpenCV kernel better matches rounded apple regions than a square.
     kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (3, 3),
     )
 
+    # MORPH_OPEN erodes and then dilates, removing small white specks.
     return cv2.morphologyEx(
         mask,
         cv2.MORPH_OPEN,
@@ -172,11 +183,13 @@ def apply_closing(
             "Closing expects a single-channel binary mask."
         )
 
+    # A slightly larger ellipse closes small breaks within the apple region.
     kernel = cv2.getStructuringElement(
         cv2.MORPH_ELLIPSE,
         (5, 5),
     )
 
+    # MORPH_CLOSE dilates and then erodes, filling narrow gaps and holes.
     return cv2.morphologyEx(
         mask,
         cv2.MORPH_CLOSE,
@@ -194,12 +207,14 @@ def create_apple_candidate_mask(
 
     _validate_bgr(image)
 
+    # HSV makes colour-range selection more direct than raw BGR channel values.
     hsv = cv2.cvtColor(
         image,
         cv2.COLOR_BGR2HSV,
     )
 
     # Red
+    # inRange returns 255 for pixels inside the lower red hue range and 0 otherwise.
     red_mask_1 = cv2.inRange(
         hsv,
         np.array(
@@ -212,6 +227,7 @@ def create_apple_candidate_mask(
         ),
     )
 
+    # Red wraps around the HSV hue scale, so a second upper range is required.
     red_mask_2 = cv2.inRange(
         hsv,
         np.array(
@@ -230,6 +246,7 @@ def create_apple_candidate_mask(
     )
 
     # Green
+    # Build a binary mask for green pixels that may represent unripe apples.
     green_mask = cv2.inRange(
         hsv,
         np.array(
@@ -243,6 +260,7 @@ def create_apple_candidate_mask(
     )
 
     # Yellow
+    # Build a binary mask for yellow pixels that may represent ripening apples.
     yellow_mask = cv2.inRange(
         hsv,
         np.array(
@@ -283,6 +301,7 @@ def create_apple_candidate_mask(
 def create_apple_colour_mask(
     image: np.ndarray,
 ) -> np.ndarray:
+    """Return the apple-colour mask through the Module 2 compatibility API."""
 
     return create_apple_candidate_mask(
         image
@@ -431,6 +450,8 @@ def segment_background_with_steps(
 
     # Run GrabCut safely
     try:
+        # GrabCut uses the colour mask as foreground guidance and learns statistical
+        # foreground/background colour models over the requested iterations.
         cv2.grabCut(
             image,
             grabcut_labels,
@@ -441,6 +462,7 @@ def segment_background_with_steps(
             cv2.GC_INIT_WITH_MASK,
         )
 
+        # NumPy converts GrabCut's four label types into a standard 0/255 mask.
         grabcut_mask = np.where(
             (
                 grabcut_labels == cv2.GC_FGD
@@ -488,6 +510,7 @@ def segment_background_with_steps(
 
     if segmentation_success:
 
+        # Keep source pixels only where the final binary mask marks foreground.
         segmented_image = cv2.bitwise_and(
             image,
             image,
@@ -520,6 +543,7 @@ def segment_background_with_steps(
 def segment_background(
     image: np.ndarray,
 ) -> np.ndarray:
+    """Segment the apple from the background and return only the final image."""
 
     result = segment_background_with_steps(
         image
@@ -619,6 +643,7 @@ def preprocess_image(
     image: np.ndarray,
     config: PreprocessingConfig | None = None,
 ) -> np.ndarray:
+    """Run the preprocessing pipeline and return only its final image."""
 
     result = preprocess_image_with_steps(
         image,

@@ -1,6 +1,6 @@
-from __future__ import annotations
+from __future__ import annotations  # Defer type-hint evaluation for modern annotations.
 
-from dataclasses import dataclass
+from dataclasses import dataclass  # Generates an immutable configuration container.
 
 
 @dataclass(frozen=True)

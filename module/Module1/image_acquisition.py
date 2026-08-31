@@ -1,16 +1,16 @@
 """Module 1 image acquisition: upload, batch upload and camera capture."""
 
-from __future__ import annotations
+from __future__ import annotations  # Defer type-hint evaluation for modern annotations.
 
-import hashlib
-import io
-from datetime import datetime
-from pathlib import Path
+import hashlib  # Creates content hashes so the same upload is not saved twice.
+import io  # Wraps uploaded bytes in a file-like object for Pillow.
+from datetime import datetime  # Adds a timestamp to saved image names.
+from pathlib import Path  # Builds portable upload paths and file names.
 
-import cv2
-import numpy as np
-import streamlit as st
-from PIL import Image, UnidentifiedImageError
+import cv2  # OpenCV converts colour formats and writes processed images.
+import numpy as np  # Represents OpenCV images as multidimensional arrays.
+import streamlit as st  # Provides upload, camera, message, and image UI widgets.
+from PIL import Image, UnidentifiedImageError  # Pillow decodes and validates images.
 
 
 # ============================================================
@@ -52,14 +52,17 @@ def pil_to_cv2(
     Convert a PIL image into an OpenCV BGR image.
     """
 
+    # Pillow normalizes inputs such as grayscale or RGBA images to three-channel RGB.
     rgb_image = image.convert(
         "RGB"
     )
 
+    # NumPy changes the Pillow object into the array representation OpenCV expects.
     np_image = np.array(
         rgb_image
     )
 
+    # Pillow uses RGB order while OpenCV conventionally uses BGR order.
     return cv2.cvtColor(
         np_image,
         cv2.COLOR_RGB2BGR,
@@ -73,11 +76,13 @@ def pil_to_cv2(
 def _read_uploaded_image(
     uploaded_file,
 ) -> tuple[np.ndarray, Image.Image]:
+    """Decode an uploaded file and return OpenCV and PIL image versions."""
 
     file_bytes = (
         uploaded_file.getvalue()
     )
 
+    # BytesIO lets Pillow read Streamlit's in-memory upload like a normal file.
     pil_image = Image.open(
         io.BytesIO(file_bytes)
     )
@@ -102,6 +107,7 @@ def _save_uploaded_image(
     uploaded_file,
     pil_image: Image.Image,
 ) -> Path:
+    """Save an uploaded image under a timestamped name and return its path."""
 
     ORIGINAL_DIR.mkdir(
         parents=True,
@@ -112,6 +118,7 @@ def _save_uploaded_image(
         uploaded_file.name
     )
 
+    # strftime produces a filesystem-safe, sortable date-and-time suffix.
     timestamp = datetime.now().strftime(
         "%Y%m%d_%H%M%S"
     )
@@ -179,6 +186,7 @@ def save_processed_image(
         / saved_name
     )
 
+    # OpenCV encodes the array according to the extension in saved_path.
     success = cv2.imwrite(
         saved_path.as_posix(),
         processed_image,
@@ -200,7 +208,9 @@ def _maybe_save_uploaded_image(
     uploaded_file,
     pil_image: Image.Image,
 ) -> Path:
+    """Save an upload once per session, reusing its path when seen again."""
 
+    # A SHA-256 digest identifies file content even when filenames are identical.
     file_hash = hashlib.sha256(
         uploaded_file.getvalue()
     ).hexdigest()
@@ -238,7 +248,9 @@ def _display_uploaded_image(
     image: np.ndarray,
     pil_image: Image.Image,
 ) -> None:
+    """Display an uploaded image and its basic file details in Streamlit."""
 
+    # channels="BGR" tells Streamlit to display the OpenCV channel order correctly.
     st.image(
         image,
         channels="BGR",
@@ -262,6 +274,7 @@ def _display_uploaded_image(
 def _validate_uploaded_file(
     uploaded_file,
 ) -> bool:
+    """Check an upload's extension and size, displaying errors when invalid."""
 
     file_extension = (
         Path(
@@ -308,6 +321,7 @@ def _validate_uploaded_file(
 def _process_uploaded_file(
     uploaded_file,
 ) -> tuple[np.ndarray, Path] | None:
+    """Validate, decode, display, and save one uploaded image."""
 
     if not _validate_uploaded_file(
         uploaded_file
@@ -397,6 +411,9 @@ def _process_uploaded_file(
 # ============================================================
 
 def upload_single_image():
+    """Render a single-image uploader and return the processed upload details."""
+
+    # Streamlit returns an in-memory UploadedFile, or None before a selection.
     uploaded_file = st.file_uploader(
         "Upload an apple image",
         type=[
@@ -424,7 +441,9 @@ def upload_single_image():
 # ============================================================
 
 def upload_batch_images():
+    """Render a multi-image uploader and return all valid uploaded images."""
 
+    # Multiple-file mode returns a list of UploadedFile objects.
     uploaded_files = st.file_uploader(
         "Upload apple images",
         type=[
@@ -471,7 +490,9 @@ def upload_batch_images():
 # ============================================================
 
 def camera_capture():
+    """Capture one camera image and process it like a regular upload."""
 
+    # camera_input returns a file-like image captured by the browser camera.
     captured_file = st.camera_input(
         "Take a picture of an apple"
     )
