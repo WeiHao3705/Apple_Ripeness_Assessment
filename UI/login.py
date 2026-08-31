@@ -313,6 +313,14 @@ LOGIN_FLOW_KEY = "supabase_google_flow_id"
 DEFAULT_REDIRECT_URL = "http://localhost:8000/"
 FLOW_TTL_SECONDS = 10 * 60
 
+# Authentication flow overview:
+# 1. Supabase creates a Google OAuth URL and a PKCE verifier.
+# 2. The browser visits Google, then returns with a short-lived auth code.
+# 3. _handle_oauth_callback exchanges that code for Supabase session tokens.
+# 4. Only the tokens and basic user details are kept in Streamlit session_state.
+# The publishable key is safe for browser-style use; never put a Supabase
+# service-role key in this application or in a committed secrets file.
+
 
 class _OAuthFlowCache:
     """Hold short-lived PKCE data while the browser visits Google."""
@@ -421,6 +429,7 @@ def _supabase_settings() -> tuple[str, str, str]:
 
 
 def _create_supabase_client(*, storage: Any | None = None) -> Client:
+    """Create a PKCE-enabled Supabase client from Streamlit secrets."""
     project_url, publishable_key, _ = _supabase_settings()
     options = SyncClientOptions(
         flow_type="pkce",
@@ -438,6 +447,7 @@ def _callback_url(flow_id: str) -> str:
 
 
 def _new_google_login_url() -> tuple[str, str]:
+    """Start one isolated Google login flow and return its URL and ID."""
     flow_id = secrets.token_urlsafe(24)
     storage = _OAuthFlowStorage(_oauth_flow_cache(), flow_id)
     client = _create_supabase_client(storage=storage)
@@ -462,6 +472,7 @@ def _google_login_url() -> str:
 
 
 def _store_session(session: Any) -> None:
+    """Copy the Supabase tokens and display-safe user data into session state."""
     user = session.user
     metadata = user.user_metadata or {}
     display_name = (
@@ -495,6 +506,7 @@ def _clear_callback_parameters() -> None:
 
 
 def _handle_oauth_callback() -> None:
+    """Exchange Google's callback code for a usable Supabase login session."""
     error_description = st.query_params.get("error_description")
     if error_description:
         st.session_state[AUTH_ERROR_KEY] = str(error_description)
@@ -544,6 +556,7 @@ def _handle_oauth_callback() -> None:
 
 
 def _refresh_session_if_needed() -> None:
+    """Refresh an expiring access token or return the visitor to login."""
     auth_session = st.session_state.get(AUTH_SESSION_KEY)
     if not auth_session:
         return
@@ -566,11 +579,13 @@ def _refresh_session_if_needed() -> None:
 
 
 def is_logged_in() -> bool:
+    """Return whether this Streamlit browser session has a valid login."""
     _refresh_session_if_needed()
     return AUTH_SESSION_KEY in st.session_state
 
 
 def current_user() -> dict[str, str] | None:
+    """Return the small user dictionary stored for the current session."""
     if not is_logged_in():
         return None
     return st.session_state[AUTH_SESSION_KEY]["user"]
@@ -603,6 +618,7 @@ def authenticated_supabase_client() -> Client:
 
 
 def logout() -> None:
+    """End the local Supabase session and return the visitor to login."""
     auth_session = st.session_state.get(AUTH_SESSION_KEY)
     if auth_session:
         try:

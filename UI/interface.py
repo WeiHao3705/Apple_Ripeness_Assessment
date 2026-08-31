@@ -1,3 +1,18 @@
+"""Streamlit presentation layer for the apple-ripeness application.
+
+This file builds the visible pages and coordinates the other UI modules:
+
+* ``login.py`` controls Google/Supabase authentication.
+* ``image_pipeline.py`` connects input images to preprocessing, detection,
+  and the teammate-trained SVM classifier.
+* ``analysis_repository.py`` saves and retrieves authenticated history.
+* ``module.report`` creates the downloadable PDF report.
+
+The interface does not train or load the model itself. Its main job is to
+collect user input, call the pipeline, preserve results across Streamlit
+reruns, and render the returned data.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -34,6 +49,8 @@ from login import (
 
 @dataclass(frozen=True)
 class SelectedImage:
+    """Browser image bytes plus the metadata needed by the UI and history."""
+
     data: bytes
     input_method: str
     name: str
@@ -57,7 +74,7 @@ def load_app_styles() -> None:
 APPLE_MARK_HTML = '<span class="apple-shape"><i></i></span>'
 
 def render_sidebar() -> str:
-    """Display the prototype navigation menu."""
+    """Display login status and return the selected application page."""
     with st.sidebar:
         st.html(
             '<div class="brand-lockup">'
@@ -139,7 +156,12 @@ def _clear_analysis_state() -> None:
 
 
 def render_scan_input() -> list[SelectedImage]:
-    """Display the selected input control and return its still images."""
+    """Display Photo, Upload, or Live Camera and return still-image inputs.
+
+    Photo and Upload return ``SelectedImage`` objects for on-demand analysis.
+    Live Camera renders its own WebRTC processor and therefore returns no
+    still images to the normal Analyse-button flow.
+    """
     st.subheader("Input")
 
     input_method = st.segmented_control(
@@ -606,10 +628,14 @@ def render_result_panel(selected_images: list[SelectedImage], preprocessing_slot
                     with st.spinner(
                         f"Analysing image {index} of {len(selected_images)}…"
                     ):
+                        # UI-to-model hand-off: analyse_image performs all
+                        # preprocessing, detection, cropping, and SVM calls.
                         completed_analysis = analyse_image(selected_image.data)
                     completed_results.append(completed_analysis)
                     analysis_errors.append(None)
 
+                    # Guest results stay only in this Streamlit session.
+                    # Signed-in results are also persisted through Supabase.
                     if is_logged_in():
                         try:
                             saved_id = save_analysis(
@@ -769,6 +795,7 @@ def render_history_page() -> None:
 
 
 def render_about_page() -> None:
+    """Explain the system and the difference between guest and saved scans."""
     st.title("About the System")
     st.write(
         "This application combines image preprocessing, apple detection, "
@@ -782,7 +809,7 @@ def render_about_page() -> None:
 
 
 def main() -> None:
-    """Start the standalone user-interface prototype."""
+    """Configure Streamlit, enforce entry access, and route to one page."""
     # This module is imported by the root ``app.py`` entry point and remains
     # cached between Streamlit widget reruns. Keep every Streamlit page setup
     # call inside ``main`` so it is emitted again on each rerun.

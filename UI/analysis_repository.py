@@ -1,4 +1,16 @@
-"""Persist and retrieve authenticated apple analyses with Supabase."""
+"""Save and retrieve authenticated apple assessments with Supabase.
+
+This file is the application's data-access layer.  It keeps Supabase code out
+of the Streamlit interface and handles two different Supabase products:
+
+* Storage: saves the original JPEG/PNG in the ``apple-images`` bucket.
+* Database: saves one parent row in ``analyses`` and one child row for every
+  detected apple in ``analysis_results``.
+
+All requests use the signed-in user's access token from ``login.py``.  The
+actual privacy boundary must still be enforced by Supabase RLS and Storage
+policies; a user ID in a file path is not a security rule by itself.
+"""
 
 from __future__ import annotations
 
@@ -46,11 +58,18 @@ def save_analysis(
     input_method: str,
     analysis: ImageAnalysis,
 ) -> str:
-    """Upload an image and insert its analysis and per-apple results."""
+    """Upload one source image and save its parent and per-apple records.
+
+    Returns the new analysis UUID, which is shared by the Storage path and the
+    related database rows.
+    """
+    # History belongs to a Supabase Auth user. Guest analyses remain temporary.
     user_id = current_user_id()
     if user_id is None:
         raise AnalysisRepositoryError("Sign in before saving an analysis.")
 
+    # Generate the identifier in the app so Storage and both tables can refer
+    # to the same assessment before any network request is made.
     extension, content_type = _image_type(image_bytes)
     analysis_id = str(uuid4())
     image_path = f"{user_id}/{analysis_id}/original.{extension}"
@@ -61,6 +80,8 @@ def save_analysis(
     analysis_inserted = False
 
     try:
+        # Step 1: store the original input image. Images are grouped by user
+        # and analysis ID to avoid filename collisions.
         bucket.upload(
             image_path,
             image_bytes,
@@ -72,6 +93,7 @@ def save_analysis(
         )
         image_uploaded = True
 
+        # Step 2: insert the parent assessment (one row per input image).
         client.table("analyses").insert(
             {
                 "id": analysis_id,
@@ -84,6 +106,7 @@ def save_analysis(
         ).execute()
         analysis_inserted = True
 
+        # Step 3: insert the child results (one row per detected apple).
         result_rows = [
             {
                 "analysis_id": analysis_id,
@@ -121,7 +144,11 @@ def save_analysis(
 
 
 def list_analyses(limit: int = HISTORY_PAGE_SIZE) -> list[dict[str, Any]]:
-    """Return the signed-in user's newest analysis records."""
+    """Return recent parent records with their nested per-apple results.
+
+    The database RLS policy should restrict this query to the authenticated
+    user's rows. The UI additionally requires a login before making the query.
+    """
     if current_user_id() is None:
         raise AnalysisRepositoryError("Sign in to view analysis history.")
 
@@ -149,7 +176,11 @@ def list_analyses(limit: int = HISTORY_PAGE_SIZE) -> list[dict[str, Any]]:
 
 
 def download_analysis_image(image_path: str) -> bytes:
-    """Download one private history image through the user's RLS session."""
+    """Download one history image using the authenticated Supabase client.
+
+    Whether the object is private is determined by the bucket configuration
+    and Storage policies in Supabase.
+    """
     try:
         return (
             authenticated_supabase_client()

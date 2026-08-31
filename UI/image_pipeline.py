@@ -1,3 +1,15 @@
+"""Bridge Streamlit image input to the three image-processing modules.
+
+``interface.py`` supplies camera/upload bytes to :func:`analyse_image`. This
+module validates and decodes those bytes, runs preprocessing, asks the object
+detector for apple bounding boxes, and sends every apple crop to the trained
+ripeness classifier. It then packages everything into dataclasses that the UI
+can display and ``analysis_repository.py`` can save.
+
+This file does not train the model. The trained SVM is loaded inside
+``module.classification.predict_ripeness`` when a prediction is requested.
+"""
+
 from __future__ import annotations
 
 import sys
@@ -24,6 +36,8 @@ MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
 
 @dataclass
 class AppleResult:
+    """Classification output and display data for one detected apple."""
+
     apple_id: int
     crop: np.ndarray
     label: str
@@ -35,6 +49,8 @@ class AppleResult:
 
 @dataclass
 class ImageAnalysis:
+    """Complete result for one uploaded or camera-captured image."""
+
     source: np.ndarray
     processed: np.ndarray
     annotated: np.ndarray
@@ -68,12 +84,15 @@ def _white_segmented_background(
     image: np.ndarray,
     foreground_mask: np.ndarray,
 ) -> np.ndarray:
+    """Copy the foreground onto white so detection sees less background noise."""
     white_background = np.full_like(image, 255)
     return cv2.copyTo(image, foreground_mask, white_background)
 
 
 def analyse_image(image_bytes: bytes) -> ImageAnalysis:
-    """Run Modules 1–3 on one camera capture or uploaded image."""
+    """Run preprocessing, detection, and classification on one image."""
+    # Module 1: convert browser bytes to OpenCV BGR and create every
+    # preprocessing/segmentation stage used by the UI's stage viewer.
     source = decode_image(image_bytes)
     preprocessing = preprocess_image_with_steps(source)
     processed = preprocessing.final
@@ -84,9 +103,14 @@ def analyse_image(image_bytes: bytes) -> ImageAnalysis:
             preprocessing.refined_mask,
         )
 
+    # Module 2: locate apples and return a bounding box for each one, plus an
+    # annotated image that can be displayed in the result panel.
     detected_apples, annotated, _mask, message = detect_objects(processed)
     apple_results: list[AppleResult] = []
 
+    # Module 3 is imported here rather than at application startup. If the
+    # saved model or one of its dependencies is missing, detection can still
+    # succeed and the UI can show a clear classification error.
     predict_ripeness = None
     classifier_import_error = None
     try:
@@ -115,6 +139,9 @@ def analyse_image(image_bytes: bytes) -> ImageAnalysis:
 
         if predict_ripeness is not None:
             try:
+                # This is the exact call that reaches the teammate-trained SVM
+                # in module/classification.py. It returns the winning class,
+                # confidence, and probabilities for all six ripeness classes.
                 prediction = predict_ripeness(crop)
                 label = str(prediction["label"])
                 confidence = float(prediction["confidence"])
@@ -139,6 +166,8 @@ def analyse_image(image_bytes: bytes) -> ImageAnalysis:
             )
         )
 
+    # Return one structured object instead of letting the UI depend directly
+    # on the internal outputs of every processing module.
     return ImageAnalysis(
         source=source,
         processed=processed,
