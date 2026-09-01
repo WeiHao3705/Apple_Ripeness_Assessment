@@ -287,8 +287,8 @@ def _ordered_probabilities(probabilities: dict[str, float]):
     return [(label, probabilities[label]) for label in known + extras]
 
 
-def render_processing_stages(analysis: ImageAnalysis) -> None:
-    """Show Module 1 preprocessing output for inspection."""
+def render_processing_stages(analysis: ImageAnalysis, image_index: int) -> None:
+    """Show Module 1 preprocessing output for one image in the batch."""
     steps = analysis.preprocessing
 
     with st.expander("View preprocessing stages", expanded=True):
@@ -373,7 +373,7 @@ def render_processing_stages(analysis: ImageAnalysis) -> None:
         ):
             with st.container(
                 border=True,
-                key=f"preprocess-stage-{index}",
+                key=f"preprocess-stage-{index}-image-{image_index}",
             ):
                 st.html(
                     '<div class="preprocess-stage-heading">'
@@ -578,7 +578,7 @@ def render_preprocessing_results(
                     st.divider()
                 if len(selected_images) > 1:
                     st.markdown(f"**Image {index + 1}: {selected_image.name}**")
-                render_processing_stages(analysis)
+                render_processing_stages(analysis, image_index=index)
 
 
 def render_result_panel(selected_images: list[SelectedImage], preprocessing_slot) -> None:

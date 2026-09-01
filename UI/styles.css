@@ -665,7 +665,7 @@ p, [data-testid="stCaptionContainer"] { color: var(--muted); }
     box-shadow: 0 10px 24px rgba(39,67,48,.06);
 }
 
-[class*="st-key-preprocess-stage-"]:not(.st-key-preprocess-stage-7)::after {
+[class*="st-key-preprocess-stage-"]:not([class*="st-key-preprocess-stage-7-"])::after {
     content: "";
     position: absolute;
     z-index: 2;
