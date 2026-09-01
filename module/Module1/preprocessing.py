@@ -84,8 +84,8 @@ def resize_image(
         int(round(height * scale))
     )
 
-    # INTER_AREA generally retains detail when reducing an image; INTER_LINEAR
-    # gives smoother results when an image must be enlarged.
+    # INTER_AREA generally retains detail when reducing an image; 
+    # INTER_LINEAR gives smoother results when an image must be enlarged.
     if scale < 1.0:
         interpolation = cv2.INTER_AREA
     else:
@@ -366,82 +366,6 @@ def create_apple_candidate_mask(
 
     return candidate_mask
 
-
-# Compatibility Function for Module 2
-def create_apple_colour_mask(
-    image: np.ndarray,
-) -> np.ndarray:
-    """
-    Return the apple-colour mask through the Module 2 compatibility API.
-
-    This alias avoids duplicating the mask logic while preserving the function
-    name expected by code in Module 2.
-    """
-
-    return create_apple_candidate_mask(
-        image
-    )
-
-
-# Compatibility Mask Refinement
-def refine_mask(
-    mask: np.ndarray,
-    kernel_size: int = 5,
-) -> np.ndarray:
-    """
-    Refine a binary mask for use by Module 2.
-
-    Args:
-        mask: Single-channel binary foreground mask.
-        kernel_size: Width and height of the elliptical morphology kernel.
-
-    Returns:
-        The mask after noise removal and, where applicable, gap filling.
-    """
-
-    if (
-        mask is None
-        or mask.size == 0
-        or mask.ndim != 2
-    ):
-        raise ValueError(
-            "Expected a non-empty single-channel mask."
-        )
-
-    # Reuse the standard 3x3 opening helper for its most common configuration.
-    if kernel_size == 3:
-        return apply_opening(mask)
-
-    # The default 5x5 route first removes specks, then fills small internal gaps.
-    if kernel_size == 5:
-        opened = apply_opening(mask)
-
-        return apply_closing(
-            opened
-        )
-
-    # Other requested sizes use a custom ellipse for both operations.
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE,
-        (
-            kernel_size,
-            kernel_size,
-        ),
-    )
-
-    # First remove isolated foreground pixels using the custom kernel.
-    opened = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_OPEN,
-        kernel,
-    )
-
-    # Then reconnect nearby regions and close holes using the same kernel.
-    return cv2.morphologyEx(
-        opened,
-        cv2.MORPH_CLOSE,
-        kernel,
-    )
 
 # Step 3B - GrabCut Background Segmentation
 def segment_background_with_steps(
@@ -781,25 +705,3 @@ def preprocess_image_with_steps(
             "fallback_reason"
         ],
     )
-
-
-# Final Image Only
-def preprocess_image(
-    image: np.ndarray,
-    config: PreprocessingConfig | None = None,
-) -> np.ndarray:
-    """
-    Run the preprocessing pipeline and return only its final image.
-
-    Use ``preprocess_image_with_steps`` instead when intermediate masks or
-    segmentation diagnostics are needed.
-    """
-
-    # Delegate all processing to the detailed pipeline to avoid inconsistent paths.
-    result = preprocess_image_with_steps(
-        image,
-        config,
-    )
-
-    # Return the dataclass's final field for callers such as the classifier.
-    return result.final

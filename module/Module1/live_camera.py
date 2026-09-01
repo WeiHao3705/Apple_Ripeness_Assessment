@@ -155,7 +155,7 @@ class ApplePredictionProcessor:
         self.result_queue: "queue.Queue[list[ApplePrediction]]" = queue.Queue(maxsize=1)
 
     # --------------------------------------------------------
-    # Multi-apple detection across the whole camera frame (FR-LC-06)
+    # Multi-apple detection across the whole camera frame
     # --------------------------------------------------------
 
     def _detect_apple_boxes(self, frame: np.ndarray) -> list[tuple[int, int, int, int]]:
@@ -250,7 +250,7 @@ class ApplePredictionProcessor:
         return padded_boxes
 
     # --------------------------------------------------------
-    # Classification of one cropped ROI (FR-LC-06, FR-LC-07, FR-LC-08)
+    # Classification of one cropped ROI 
     # --------------------------------------------------------
 
     def _classify_roi(self, roi: np.ndarray) -> tuple[str, float] | None:
@@ -320,7 +320,7 @@ class ApplePredictionProcessor:
 
     # --------------------------------------------------------
     # Tracking: match this cycle's boxes to existing apples so each one keeps
-    # its own stabilization window across frames (FR-LC-12).
+    # its own stabilization window across frames 
     # --------------------------------------------------------
 
     def _match_track(
@@ -422,7 +422,7 @@ class ApplePredictionProcessor:
         return predictions
 
     # --------------------------------------------------------
-    # Stabilization (FR-LC-12) + confidence gate (FR-LC-13, FR-LC-14)
+    # Stabilization 
     # --------------------------------------------------------
 
     def _track_prediction(self, track: _Track) -> ApplePrediction:
@@ -458,7 +458,7 @@ class ApplePredictionProcessor:
         )
 
     # --------------------------------------------------------
-    # Overlay drawing (FR-LC-04, FR-LC-09)
+    # Overlay drawing 
     # --------------------------------------------------------
 
     def _draw_overlay(
@@ -513,7 +513,7 @@ class ApplePredictionProcessor:
             )
 
     # --------------------------------------------------------
-    # Frame callback (FR-LC-05, FR-LC-06, FR-LC-10, FR-LC-11, AF-03)
+    # Frame callback 
     # --------------------------------------------------------
 
     def recv(self, frame: "av.VideoFrame") -> "av.VideoFrame":
@@ -548,7 +548,6 @@ class ApplePredictionProcessor:
 # ============================================================
 
 def live_camera_classification() -> None:
-    """Render the Live Camera screen (FR-LC-01 .. FR-LC-15)."""
 
     playing_state_key = "apple_live_camera_requested"
     if playing_state_key not in st.session_state:
